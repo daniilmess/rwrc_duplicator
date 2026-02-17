@@ -89,19 +89,16 @@ bool rw1990_read(uint8_t* buf) {
 }
 
 bool rw1990_write(const uint8_t* newID) {
-  noInterrupts();  // пауза прерываний
-  SPI.end();  // пауза SPI (для RFID)
-
+  // Check if device is present before starting write
   uint8_t dummy[8];
   if (!rw1990_read(dummy)) {
-    SPI.begin();
-    interrupts();
     Serial.println(F("No device at start of write"));
     return false;
   }
 
   Serial.println(F("Starting write sequence..."));
 
+  // Read current ID (0x33 command)
   ow.skip();
   ow.reset();
   ow.write(0x33);
@@ -115,79 +112,88 @@ bool rw1990_write(const uint8_t* newID) {
   }
   Serial.println();
 
+  // Enter write mode (0xD1 command)
   ow.skip();
   ow.reset();
   ow.write(0xD1);
 
+  // Send unlock pulse (60µs low)
+  noInterrupts();
   digitalWrite(OW_PIN, LOW);
   pinMode(OW_PIN, OUTPUT);
-  delayMicroseconds(70);
+  delayMicroseconds(60);
   pinMode(OW_PIN, INPUT);
   digitalWrite(OW_PIN, HIGH);
-  delay(20);
+  interrupts();
+  delay(10);  // Device setup time after unlock pulse
 
+  // Write data command (0xD5)
   ow.skip();
   ow.reset();
   ow.write(0xD5);
 
+  // Write all 8 bytes
   Serial.print(F("Writing bytes: "));
   for (uint8_t i = 0; i < 8; i++) {
     rw1990_write_byte(newID[i]);
     Serial.print('*');
-    delay(10);
   }
   Serial.println();
 
-  delay(1200);  // пауза на запись
+  // Finalize write with 0xD1 command
+  ow.skip();
+  ow.reset();
+  ow.write(0xD1);
 
-  Serial.println(F("Waiting for key to process write..."));
+  // Final pulse to complete write
+  noInterrupts();
+  digitalWrite(OW_PIN, LOW);
+  pinMode(OW_PIN, OUTPUT);
+  delayMicroseconds(60);
+  pinMode(OW_PIN, INPUT);
+  digitalWrite(OW_PIN, HIGH);
+  interrupts();
 
+  // Wait for write to complete
+  delay(200);
+
+  // Single verification
+  Serial.println(F("Verifying write..."));
+  uint8_t check[8];
   bool success = false;
-  for (int attempt = 1; attempt <= 8; attempt++) {
-    delay(400);
-    Serial.print(F("Verify attempt "));
-    Serial.print(attempt);
-    Serial.print(F(": "));
-
-    uint8_t check[8];
-    if (rw1990_read(check)) {
-      bool match = (memcmp(check, newID, 8) == 0);
-      Serial.println(match ? F("MATCH OK") : F("Mismatch"));
-      if (match) {
-        success = true;
-        break;
-      }
-    } else {
-      Serial.println(F("No device on verify"));
-    }
+  
+  if (rw1990_read(check)) {
+    success = (memcmp(check, newID, 8) == 0);
+    Serial.println(success ? F("Verify: MATCH OK") : F("Verify: Mismatch"));
+  } else {
+    Serial.println(F("Verify: No device"));
   }
 
-  if (!success) {
-    Serial.println(F("All attempts failed"));
-  }
-
-  SPI.begin();  // возврат SPI
-  interrupts();  // возврат прерываний
   return success;
 }
 
 void rw1990_write_byte(uint8_t data) {
   for (uint8_t bit = 0; bit < 8; bit++) {
+    // Critical section: only during pulse generation (microseconds)
+    noInterrupts();
     if (data & 1) {
+      // Write '1': 60µs pulse
       digitalWrite(OW_PIN, LOW);
       pinMode(OW_PIN, OUTPUT);
-      delayMicroseconds(70);
+      delayMicroseconds(60);
       pinMode(OW_PIN, INPUT);
       digitalWrite(OW_PIN, HIGH);
-      delay(15);
     } else {
+      // Write '0': 5µs pulse
       digitalWrite(OW_PIN, LOW);
       pinMode(OW_PIN, OUTPUT);
       delayMicroseconds(5);
       pinMode(OW_PIN, INPUT);
       digitalWrite(OW_PIN, HIGH);
-      delay(15);
     }
+    interrupts();
+    // 15ms delay allows interrupts - adequate for iButton protocol
+    delay(15);
     data >>= 1;
   }
 }
