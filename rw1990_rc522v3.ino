@@ -58,6 +58,7 @@ uint8_t tempBuf[8];
 uint8_t tempTp = 0;
 
 unsigned long tmStart = 0;
+unsigned long lastBeepMs = 0;  // Track last beep time for WRITE mode
 bool busy = false;
 
 // ────────────────────────────────────────────────
@@ -505,6 +506,7 @@ void loop() {
           memcpy(tempBuf, keys[selKey].uid, 8);
           mode = WRITE;
           tmStart = millis();
+          lastBeepMs = 0;  // Reset beep tracking
           busy = true;
         } else {            // Delete
           deleteConfirm = false;
@@ -552,10 +554,51 @@ void loop() {
     case WRITE:
       showApply(tempTp ? "RFID (magic card)" : "RW1990 blank");
 
-      if (millis() - tmStart > 7000UL) {
-        mode = LIST; drawList(); busy = false; break;
+      // Waiting loop for key/card to be applied
+      {
+        unsigned long now = millis();
+        unsigned long elapsed = now - tmStart;
+        
+        // Check for timeout
+        if (elapsed > 7000UL) {
+          digitalWrite(LED_Y, LOW);  // Ensure LED is off on timeout
+          mode = LIST; drawList(); busy = false; break;
+        }
+        
+        // Blink yellow LED (toggle every 250ms for visible blinking)
+        if ((elapsed % 500) < 250) {
+          digitalWrite(LED_Y, HIGH);
+        } else {
+          digitalWrite(LED_Y, LOW);
+        }
+        
+        // Beep once per second
+        if (now - lastBeepMs >= 1000) {
+          toneBeep(1000, 50);
+          lastBeepMs = now;
+        }
+        
+        // Check for key/card presence
+        bool devicePresent = false;
+        if (tempTp == 0) {
+          // RW1990: check if device is present
+          uint8_t dummy[8];
+          devicePresent = rw1990_read(dummy);
+        } else {
+          // RFID: check if card is present
+          devicePresent = rfid.PICC_IsNewCardPresent();
+        }
+        
+        // If no device detected yet, stay in waiting loop
+        if (!devicePresent) {
+          break;  // Stay in WRITE case, will loop again
+        }
+        
+        // Device detected! Turn off LED and proceed with write
+        digitalWrite(LED_Y, LOW);
       }
-
+      
+      // Perform write operation
       bool res = false;
 
       if (tempTp == 0) {
