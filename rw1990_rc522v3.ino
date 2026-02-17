@@ -61,7 +61,7 @@ enum Mode {
   READ_RF,
   LIST,
   READ_RESULT,
-  SAVED_ACTION,
+  SAVED_DETAIL,
   CONFIRM_DELETE,
   WRITE
 };
@@ -271,9 +271,10 @@ void errBeep() {
 
 void tickBeep() {
   digitalWrite(LED_Y, HIGH);
-  tone(BUZZ, 800, 50);
-  delay(50);
+  tone(BUZZ, 200, 40);  // 200Hz, 40ms - Geiger counter style
+  delay(40);
   digitalWrite(LED_Y, LOW);
+  delay(460);  // Total 500ms cycle
 }
 
 // ────────────────────────────────────────────────
@@ -468,12 +469,54 @@ void drawList() {
   display.display();
 }
 
-void drawSavedAction() {
-  drawHeader("Key Action");
-  display.setCursor(4, 12); display.println(cursor == 0 ? "> Write"   : "  Write");
-  display.setCursor(4, 20); display.println(cursor == 1 ? "> Delete"  : "  Delete");
+void drawSavedKeyDetail() {
+  // Display header based on key type
+  const char* header;
+  if (keys[selKey].type == TYPE_RW1990) {
+    header = "RW1990 ID";
+  } else if (keys[selKey].type == TYPE_RFID_13M) {
+    header = "RF 13.56 MHz";
+  } else if (keys[selKey].type == TYPE_RFID_125K) {
+    header = "RF 125 kHz";
+  } else {
+    header = "Key ID";
+  }
+  
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println(header);
+  display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  
+  // Display key data
+  display.setCursor(0, 12);
+  
+  if (keys[selKey].type == TYPE_RW1990) {
+    // For RW1990: show bytes 1-6 only (skip Family byte 0 and CRC byte 7)
+    for (uint8_t j = 1; j < 7; j++) {
+      if (keys[selKey].uid[j] < 16) display.print('0');
+      display.print(keys[selKey].uid[j], HEX);
+      // Group bytes in pairs: CAC9 AF02 0000
+      if (j < 6 && j % 2 == 0) display.print(' ');
+    }
+  } else {
+    // For RF: show all bytes with spaces
+    for (uint8_t j = 0; j < keys[selKey].uidLen && j < 8; j++) {
+      if (keys[selKey].uid[j] < 16) display.print('0');
+      display.print(keys[selKey].uid[j], HEX);
+      if (j < keys[selKey].uidLen - 1) display.print(' ');
+    }
+  }
+  
+  // Display menu at bottom
+  display.setCursor(0, 24);
+  display.print(cursor == 0 ? "   [Write]" : "    Write ");
+  display.print(cursor == 1 ? " [Delete]" : "  Delete");
+  
   display.display();
 }
+
 
 void drawConfirmDelete() {
   drawHeader("Delete key?");
@@ -511,11 +554,48 @@ void printUID(const uint8_t* d, uint8_t len) {
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
   
   display.setCursor(0, 14);
-  for (uint8_t i = 0; i < len; i++) {
-    if (d[i] < 16) display.print('0');
-    display.print(d[i], HEX);
-    if (i < len - 1) display.print(' ');
+  
+  // Format based on key type
+  if (tempTp == TYPE_RW1990 && len == 8) {
+    // RW1990: 01 CAC9 AF02 0000 C0
+    // Byte 0 (Family code) - standalone
+    if (d[0] < 16) display.print('0');
+    display.print(d[0], HEX);
+    display.print(' ');
+    
+    // Bytes 1-2 (grouped)
+    if (d[1] < 16) display.print('0');
+    display.print(d[1], HEX);
+    if (d[2] < 16) display.print('0');
+    display.print(d[2], HEX);
+    display.print(' ');
+    
+    // Bytes 3-4 (grouped)
+    if (d[3] < 16) display.print('0');
+    display.print(d[3], HEX);
+    if (d[4] < 16) display.print('0');
+    display.print(d[4], HEX);
+    display.print(' ');
+    
+    // Bytes 5-6 (grouped)
+    if (d[5] < 16) display.print('0');
+    display.print(d[5], HEX);
+    if (d[6] < 16) display.print('0');
+    display.print(d[6], HEX);
+    display.print(' ');
+    
+    // Byte 7 (CRC) - standalone
+    if (d[7] < 16) display.print('0');
+    display.print(d[7], HEX);
+  } else {
+    // RF cards: show all bytes with spaces
+    for (uint8_t i = 0; i < len; i++) {
+      if (d[i] < 16) display.print('0');
+      display.print(d[i], HEX);
+      if (i < len - 1) display.print(' ');
+    }
   }
+  
   display.display();
 }
 
@@ -737,16 +817,73 @@ void loop() {
       break;
 
     case READ_RESULT:
-      if (millis() - tmStart > 3500UL) {
-        mode = MAIN; drawMain(); busy = false; break;
+      // Display result for 1 second, then return to scanning
+      if (millis() - tmStart > 1000UL) {
+        // Return to appropriate scanning mode
+        if (tempTp == TYPE_RW1990) {
+          mode = READ_RW;
+          tmStart = millis();  // Reset scan timeout
+          lastTickMs = millis();
+          inScanMode = true;
+          
+          // Display scanning message
+          display.clearDisplay();
+          display.setTextSize(1);
+          display.setCursor(0, 8);
+          display.println(F("Scanning RW1990..."));
+          display.println(F("Hold 2s to exit"));
+          display.display();
+        } else {
+          mode = READ_RF;
+          tmStart = millis();  // Reset scan timeout
+          lastTickMs = millis();
+          inScanMode = true;
+          
+          // Display scanning message
+          display.clearDisplay();
+          display.setTextSize(1);
+          display.setCursor(0, 8);
+          display.println(F("Scanning RF..."));
+          display.println(F("Hold 2s to exit"));
+          display.display();
+        }
+        break;
       }
+      
+      // Allow user to save key during display
       if (enc.click()) {
         if (addKey(tempTp, tempBuf, tempUidLen)) okBeep();
         else errBeep();
-        mode = MAIN; drawMain(); busy = false;
+        
+        // Return to scanning after saving
+        if (tempTp == TYPE_RW1990) {
+          mode = READ_RW;
+        } else {
+          mode = READ_RF;
+        }
+        tmStart = millis();  // Reset scan timeout
+        lastTickMs = millis();
+        inScanMode = true;
+        
+        // Display scanning message
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setCursor(0, 8);
+        if (tempTp == TYPE_RW1990) {
+          display.println(F("Scanning RW1990..."));
+        } else {
+          display.println(F("Scanning RF..."));
+        }
+        display.println(F("Hold 2s to exit"));
+        display.display();
       }
+      
+      // Hold to exit to main menu
       if (enc.hold()) {
-        mode = MAIN; drawMain(); busy = false;
+        mode = MAIN; 
+        drawMain(); 
+        busy = false;
+        inScanMode = false;
       }
       break;
 
@@ -758,18 +895,18 @@ void loop() {
       }
       if (enc.click()) {
         cursor = 0;
-        drawSavedAction();
-        mode = SAVED_ACTION;
+        drawSavedKeyDetail();
+        mode = SAVED_DETAIL;
       }
       if (enc.hold()) {
         mode = MAIN; drawMain();
       }
       break;
 
-    case SAVED_ACTION:
+    case SAVED_DETAIL:
       if (enc.turn()) {
         cursor = (cursor + enc.dir() + 2) % 2;
-        drawSavedAction();
+        drawSavedKeyDetail();
       }
       if (enc.click()) {
         if (cursor == 0) {  // Write
@@ -813,13 +950,13 @@ void loop() {
             }
           }
         } else {
-          mode = SAVED_ACTION;
-          drawSavedAction();
+          mode = SAVED_DETAIL;
+          drawSavedKeyDetail();
         }
       }
       if (enc.hold()) {
-        mode = SAVED_ACTION;
-        drawSavedAction();
+        mode = SAVED_DETAIL;
+        drawSavedKeyDetail();
       }
       break;
 
