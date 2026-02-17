@@ -125,7 +125,7 @@ bool rw1990_write(const uint8_t* newID) {
   pinMode(OW_PIN, INPUT);
   digitalWrite(OW_PIN, HIGH);
   interrupts();
-  delay(10);
+  delay(10);  // Device setup time after unlock pulse
 
   // Write data command (0xD5)
   ow.skip();
@@ -174,6 +174,7 @@ bool rw1990_write(const uint8_t* newID) {
 
 void rw1990_write_byte(uint8_t data) {
   for (uint8_t bit = 0; bit < 8; bit++) {
+    // Critical section: only during pulse generation (microseconds)
     noInterrupts();
     if (data & 1) {
       // Write '1': 60µs pulse
@@ -191,7 +192,8 @@ void rw1990_write_byte(uint8_t data) {
       digitalWrite(OW_PIN, HIGH);
     }
     interrupts();
-    delay(15);  // 15ms delay between bits
+    // 15ms delay allows interrupts - adequate for iButton protocol
+    delay(15);
     data >>= 1;
   }
 }
