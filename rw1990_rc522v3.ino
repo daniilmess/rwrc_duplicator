@@ -498,7 +498,7 @@ void drawSavedKeyDetail() {
       if (keys[selKey].uid[j] < 16) display.print('0');
       display.print(keys[selKey].uid[j], HEX);
       // Group bytes in pairs: CAC9 AF02 0000
-      if (j < 6 && j % 2 == 0) display.print(' ');
+      if (j < 6 && j % 2 == 1) display.print(' ');
     }
   } else {
     // For RF: show all bytes with spaces
@@ -511,8 +511,11 @@ void drawSavedKeyDetail() {
   
   // Display menu at bottom
   display.setCursor(0, 24);
-  display.print(cursor == 0 ? "   [Write]" : "    Write ");
-  display.print(cursor == 1 ? " [Delete]" : "  Delete");
+  if (cursor == 0) {
+    display.print("   [Write]  Delete");
+  } else {
+    display.print("    Write  [Delete]");
+  }
   
   display.display();
 }
