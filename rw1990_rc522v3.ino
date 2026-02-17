@@ -552,6 +552,8 @@ void loop() {
       break;
 
     case WRITE:
+      // This case implements a waiting loop that repeats via the main loop()
+      // until a device is detected or timeout occurs (7 seconds)
       showApply(tempTp ? "RFID (magic card)" : "RW1990 blank");
 
       // Waiting loop for key/card to be applied
@@ -582,16 +584,17 @@ void loop() {
         bool devicePresent = false;
         if (tempTp == 0) {
           // RW1990: check if device is present
-          uint8_t dummy[8];
-          devicePresent = rw1990_read(dummy);
+          uint8_t presenceCheckBuf[8];
+          devicePresent = rw1990_read(presenceCheckBuf);
         } else {
           // RFID: check if card is present
           devicePresent = rfid.PICC_IsNewCardPresent();
         }
         
-        // If no device detected yet, stay in waiting loop
+        // If no device detected yet, stay in waiting loop by breaking here
+        // The main loop() will re-enter this WRITE case on the next iteration
         if (!devicePresent) {
-          break;  // Stay in WRITE case, will loop again
+          break;
         }
         
         // Device detected! Turn off LED and proceed with write
