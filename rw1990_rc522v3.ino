@@ -155,7 +155,7 @@ bool rw1990_write(const uint8_t* newID) {
   interrupts();
 
   // Wait for write to complete
-  delay(50);
+  delay(200);
 
   // Single verification
   Serial.println(F("Verifying write..."));
