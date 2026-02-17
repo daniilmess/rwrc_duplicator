@@ -30,6 +30,17 @@ EncButton enc(ENC_A, ENC_B, ENC_BTN);
 
 #define MAX_KEYS   10
 
+// PROGMEM String Constants
+const char STR_RW1990_ID[] PROGMEM = "RW1990 ID";
+const char STR_RF_13M[] PROGMEM = "RF 13.56 MHz";
+const char STR_RF_125K[] PROGMEM = "RF 125 kHz";
+const char STR_KEY_ID[] PROGMEM = "Key ID";
+const char STR_SAVED_KEYS[] PROGMEM = "Saved Keys";
+const char STR_DIAGNOSTICS[] PROGMEM = "DIAGNOSTICS";
+const char STR_SCANNING_RW[] PROGMEM = "Scanning RW1990...";
+const char STR_SCANNING_RF[] PROGMEM = "Scanning RF...";
+const char STR_HOLD_EXIT[] PROGMEM = "Hold 2s to exit";
+
 enum KeyType {
   TYPE_RW1990 = 0,
   TYPE_RFID_13M = 1,
@@ -666,6 +677,39 @@ void printUID(const uint8_t* d, uint8_t len) {
   }
   
   display.display();
+}
+
+// Universal UID display helper function
+void displayUID(uint8_t type, const uint8_t* uid, uint8_t uidLen, bool isRaw) {
+  if (type == TYPE_RW1990 && uidLen == 8 && !isRaw) {
+    // RW1990: show bytes with grouping
+    if (uid[0] < 16) display.print('0');
+    display.print(uid[0], HEX);
+    display.print(' ');
+    
+    for (uint8_t i = 1; i < 7; i++) {
+      if (uid[i] < 16) display.print('0');
+      display.print(uid[i], HEX);
+      if (i % 2 == 0) display.print(' ');
+    }
+    
+    if (uid[7] < 16) display.print('0');
+    display.print(uid[7], HEX);
+  } else if (type == TYPE_RW1990 && isRaw) {
+    // RW1990 raw: show all bytes simply
+    for (uint8_t i = 0; i < uidLen; i++) {
+      if (uid[i] < 16) display.print('0');
+      display.print(uid[i], HEX);
+      if (i < uidLen - 1) display.print(' ');
+    }
+  } else {
+    // RF cards: show all bytes with spaces
+    for (uint8_t i = 0; i < uidLen; i++) {
+      if (uid[i] < 16) display.print('0');
+      display.print(uid[i], HEX);
+      if (i < uidLen - 1) display.print(' ');
+    }
+  }
 }
 
 // ────────────────────────────────────────────────
