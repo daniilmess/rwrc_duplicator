@@ -65,6 +65,7 @@ bool busy = false;
 // ────────────────────────────────────────────────
 
 bool rw1990_read(uint8_t* buf) {
+  ow.reset_search();  // Reset search state to ensure fresh device detection
   noInterrupts();  // пауза прерываний
   bool res = false;
   if (ow.search(buf)) {
