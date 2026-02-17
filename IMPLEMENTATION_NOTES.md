@@ -198,3 +198,149 @@ Potential improvements for future versions:
 4. Add key statistics (times used, last used timestamp)
 5. Implement key backup/restore via serial interface
 6. Add battery monitoring and low battery warning
+
+---
+
+## Recent Enhancements (Latest Update)
+
+### 1. Startup Logo Display Fix
+**Issue:** Logo didn't display on startup, music played first
+**Solution:** Reordered initialization sequence:
+- Display initialized first with `display.begin()`
+- Other peripherals (SPI, RFID) initialized after display
+- Logo displayed, then startup music plays
+- Ensures logo is visible for full 2 seconds
+
+### 2. Unified Menu Selector
+**Change:** All menus now use consistent `>` arrow style
+**Implementation:** Verified all menus (main, diagnostics, saved keys, confirm delete) use `>` prefix for selected items
+
+### 3. Diagnostics Menu (4th Main Menu Item)
+**New Feature:** Safe diagnostics operations for troubleshooting
+
+**Menu Structure:**
+```
+MAIN MENU:
+> Read RW1990
+  Read RF
+  Saved Keys
+  Diagnostics  ← NEW
+```
+
+**Diagnostics Submenu:**
+```
+DIAGNOSTICS
+──────────────────
+> RW Check
+  RW Read Raw
+  RW Erase FF
+  RF Erase
+```
+
+**Operations:**
+
+**3a. RW Check**
+- Simple presence detection without CRC verification
+- Displays "RW Found!" or "No RW Key"
+- Uses new `rw1990_check_presence()` helper
+- Appropriate beep feedback (okBeep/errBeep)
+
+**3b. RW Read Raw**
+- Reads all 8 bytes without CRC check
+- Uses new `rw1990_read_raw()` helper
+- Shows "(no CRC check)" note on display
+- Helps diagnose damaged/corrupted keys
+- Displays raw hex data for all bytes
+
+**3c. RW Erase FF**
+- Writes all 0xFF bytes to RW1990
+- Uses new `rw1990_erase_ff()` helper
+- Safe way to "blank" corrupted keys
+- 5-second timeout for key placement
+- Confirms result with beeps
+
+**3d. RF Erase**
+- Erases Mifare/RF cards (especially blank Chinese cards)
+- Writes zeros to sectors 1-3 (test sectors)
+- Uses default key (0xFF x 6) for authentication
+- Handles password-protected cards gracefully
+- Displays "(Protected?)" on authentication failure
+- 5-second timeout for card placement
+
+### 4. Code Optimization
+**Improvements:**
+
+**4a. PROGMEM String Constants**
+Added string constants to save RAM:
+```cpp
+const char STR_RW1990_ID[] PROGMEM = "RW1990 ID";
+const char STR_RF_13M[] PROGMEM = "RF 13.56 MHz";
+const char STR_RF_125K[] PROGMEM = "RF 125 kHz";
+// ... and more
+```
+
+**4b. Universal displayUID() Helper Function**
+New helper for consistent UID display across different contexts:
+- Parameters: `type`, `uid array`, `uidLen`, `isRaw flag`
+- Handles RW1990 (with grouping) vs RF (all bytes)
+- Supports raw mode for diagnostics
+- Reduces code duplication
+
+**4c. Existing Optimizations**
+- `drawHeader()` already centralized for header drawing
+- `printUID()` already handles different key types
+- F() macro used throughout for flash strings
+
+### 5. Sound Effects Refinement
+**Updated Beep Functions:**
+
+**okBeep()** - Ascending "yes" sound
+```cpp
+1400Hz for 100ms → delay 20ms → 1900Hz for 100ms
+```
+Creates clear positive feedback (low to high pitch)
+
+**errBeep()** - Descending "no" sound
+```cpp
+1900Hz for 100ms → delay 20ms → 1400Hz for 100ms
+```
+Creates clear negative feedback (high to low pitch)
+
+**tickBeep()** - Short Geiger counter click
+```cpp
+150Hz for 30ms, then 470ms silence
+```
+Very low, very short tick/click sound during scanning (500ms cycle)
+
+### 6. Key Display Duration
+**Change:** Increased from 1 second to 3 seconds
+- After successful key read, result shown for 3000ms
+- Applies to all read modes (RW, RF)
+- Gives user more time to verify read
+- Then returns to continuous scanning
+
+### Code Size & Memory
+- Total additions: ~443 lines (including diagnostics functions and modes)
+- All features work within Arduino Nano constraints
+- PROGMEM usage optimized for RAM conservation
+- Diagnostic helper functions added: 3 new functions
+
+### Testing Recommendations for New Features
+1. **Startup Test**: Power on device, verify logo shows before music
+2. **Menu Navigation**: Navigate to 4th menu item (Diagnostics)
+3. **RW Check**: Test with and without RW key present
+4. **RW Read Raw**: Test with good and corrupted keys
+5. **RW Erase FF**: Test with blank RW1990 key
+6. **RF Erase**: Test with blank Chinese Mifare card
+7. **Sound Test**: Verify ascending okBeep, descending errBeep, low tickBeep
+8. **Display Duration**: Verify 3-second display after key read
+9. **Memory Test**: Compile and verify no overflow errors
+
+### Implementation Details
+- New enum modes: `DIAGNOSTICS`, `DIAG_RW_CHECK`, `DIAG_RW_RAW`, `DIAG_RW_ERASE_FF`, `DIAG_RF_ERASE`
+- Main menu cursor now cycles 0-3 (4 items)
+- Diagnostics submenu supports scrolling for 4 items
+- All diagnostic operations include proper timeout handling
+- Diagnostic operations return to diagnostics menu after completion
+- Hold encoder to exit diagnostics back to main menu
+
