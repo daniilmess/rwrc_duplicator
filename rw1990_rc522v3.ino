@@ -254,27 +254,26 @@ void toneBeep(int hz, int ms) {
 
 void okBeep() {
   digitalWrite(LED_G, HIGH);
-  toneBeep(1400, 90); delay(50);
-  toneBeep(1900, 90); delay(50);
-  toneBeep(2400, 140);
+  toneBeep(1400, 100); delay(20);
+  toneBeep(1900, 100);
   delay(600);
   digitalWrite(LED_G, LOW);
 }
 
 void errBeep() {
   digitalWrite(LED_Y, HIGH);
-  toneBeep(380, 320); delay(100);
-  toneBeep(280, 380);
+  toneBeep(1900, 100); delay(20);
+  toneBeep(1400, 100);
   delay(1000);
   digitalWrite(LED_Y, LOW);
 }
 
 void tickBeep() {
   digitalWrite(LED_Y, HIGH);
-  tone(BUZZ, 200, 40);  // 200Hz, 40ms - Geiger counter style
-  delay(40);
+  tone(BUZZ, 150, 30);  // 150Hz, 30ms - short Geiger counter click
+  delay(30);
   digitalWrite(LED_Y, LOW);
-  delay(460);  // Total 500ms cycle
+  delay(470);  // Total 500ms cycle
 }
 
 // ────────────────────────────────────────────────
@@ -617,6 +616,7 @@ void setup() {
 
   delay(500);
 
+  // Initialize display first
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
     Serial.println(F("SSD1306 init failed! Try 0x3D"));
     while (1);
@@ -626,14 +626,17 @@ void setup() {
   display.display();
   delay(100);
 
+  // Show logo
   drawLogo();
 
+  // Initialize other peripherals
+  SPI.begin();
+  rfid.PCD_Init();
+
+  // Play startup sound after logo display
   playMusic();
 
   delay(1500);
-
-  SPI.begin();
-  rfid.PCD_Init();
 
   enc.setTimeout(380);
 
@@ -820,8 +823,8 @@ void loop() {
       break;
 
     case READ_RESULT:
-      // Display result for 1 second, then return to scanning
-      if (millis() - tmStart > 1000UL) {
+      // Display result for 3 seconds, then return to scanning
+      if (millis() - tmStart > 3000UL) {
         // Return to appropriate scanning mode
         if (tempTp == TYPE_RW1990) {
           mode = READ_RW;
