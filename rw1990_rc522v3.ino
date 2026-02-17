@@ -79,6 +79,7 @@ unsigned long tmStart = 0;
 unsigned long lastBeepMs = 0;  // Track last beep time for WRITE mode
 unsigned long lastTickMs = 0;   // Track last tick for scanning
 unsigned long holdStartMs = 0;  // Track hold start for factory reset
+unsigned long scanHoldStartMs = 0;  // Track hold start for scan exit
 bool busy = false;
 bool inScanMode = false;
 
@@ -632,12 +633,19 @@ void loop() {
 
     case READ_RW:
       // Check for 2-second hold to exit
-      if (enc.holded()) {
-        mode = MAIN; 
-        drawMain(); 
-        busy = false; 
-        inScanMode = false;
-        break;
+      if (enc.pressing()) {
+        if (scanHoldStartMs == 0) {
+          scanHoldStartMs = millis();
+        } else if (millis() - scanHoldStartMs >= 2000UL) {
+          mode = MAIN; 
+          drawMain(); 
+          busy = false; 
+          inScanMode = false;
+          scanHoldStartMs = 0;
+          break;
+        }
+      } else {
+        scanHoldStartMs = 0;
       }
       
       // Check for 15-second timeout
@@ -675,12 +683,19 @@ void loop() {
 
     case READ_RF:
       // Check for 2-second hold to exit
-      if (enc.holded()) {
-        mode = MAIN; 
-        drawMain(); 
-        busy = false; 
-        inScanMode = false;
-        break;
+      if (enc.pressing()) {
+        if (scanHoldStartMs == 0) {
+          scanHoldStartMs = millis();
+        } else if (millis() - scanHoldStartMs >= 2000UL) {
+          mode = MAIN; 
+          drawMain(); 
+          busy = false; 
+          inScanMode = false;
+          scanHoldStartMs = 0;
+          break;
+        }
+      } else {
+        scanHoldStartMs = 0;
       }
       
       // Check for 15-second timeout
