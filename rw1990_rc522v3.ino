@@ -90,6 +90,8 @@ bool inScanMode = false;
 
 
 // Helper function to check Family/CRC errors and return error message
+// Validates RW1990 family byte (buf[0]) and CRC checksum (buf[7])
+// Returns: Error status string ("OK", "Family:ERR", "CRC:ERR", or "Family:ERR CRC:ERR")
 const char* rw1990_check_errors(const uint8_t* buf) {
   byte crc = ow.crc8(buf, 7);
   bool familyOk = (buf[0] == 0x01);
@@ -106,6 +108,13 @@ const char* rw1990_check_errors(const uint8_t* buf) {
   }
 }
 
+// Read RW1990 key and output diagnostics to serial
+// Parameters:
+//   buf: Buffer to store 8-byte UID
+// Returns:
+//   true if key is found (regardless of Family/CRC errors)
+//   false if no key is present
+// Note: Always outputs diagnostic info to Serial including error status
 bool rw1990_read(uint8_t* buf) {
   ow.reset_search();
   noInterrupts();
@@ -134,6 +143,13 @@ bool rw1990_read(uint8_t* buf) {
 }
 
 // Unified function: read RW1990 key and display with error status
+// Parameters:
+//   buf: Buffer to store 8-byte UID
+//   clearAndDraw: true to clear screen and draw header, false to add to existing display
+// Returns:
+//   true if key is found and displayed
+//   false if no key is present
+// Display: Shows UID at line 14, error status at line 24
 bool rw1990_read_and_display(uint8_t* buf, bool clearAndDraw) {
   if (!rw1990_read(buf)) {
     return false;  // No key found
@@ -161,7 +177,15 @@ bool rw1990_read_and_display(uint8_t* buf, bool clearAndDraw) {
   return true;
 }
 
-// Unified function: read RF card and display
+// Unified function: read RF card and display UID
+// Parameters:
+//   buf: Buffer to store UID (up to RW1990_UID_SIZE bytes)
+//   uidLen: Output parameter - actual UID length read from card
+//   clearAndDraw: true to clear screen and draw header, false to add to existing display
+// Returns:
+//   true if card is found and displayed
+//   false if no card is present
+// Display: Shows UID at line 14
 bool rfid_read_and_display(uint8_t* buf, uint8_t* uidLen, bool clearAndDraw) {
   if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
     return false;  // No card found
@@ -701,7 +725,7 @@ void loop() {
       // Try to read and display RW1990 using unified function
       if (rw1990_read_and_display(tempBuf, true)) {
         tempTp = TYPE_RW1990;
-        tempUidLen = 8;
+        tempUidLen = RW1990_UID_SIZE;
         
         okBeep();
         
