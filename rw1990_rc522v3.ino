@@ -9,14 +9,14 @@
 
 #define SCREEN_W  128
 #define SCREEN_H   32
-#define OLED_ADDR 0x3C          // если не работает → попробуй 0x3D
+#define OLED_ADDR 0x3C
 Adafruit_SSD1306 display(SCREEN_W, SCREEN_H, &Wire, -1);
 
 #define SS_PIN     10
 #define RST_PIN     9
 MFRC522 rfid(SS_PIN, RST_PIN);
 
-#define OW_PIN      8           // RW1990 на D8 + pull-up 4.7k или 2.2k
+#define OW_PIN      8
 OneWire ow(OW_PIN);
 
 #define ENC_A       2
@@ -354,7 +354,7 @@ bool addKey(uint8_t tp, const uint8_t* d, uint8_t len) {
   keys[keyCnt].type = tp;
   memcpy(keys[keyCnt].uid, d, 8);
   keys[keyCnt].uidLen = len;
-  keys[keyCnt].name[0] = '\0';  // Empty name for user keys
+  keys[keyCnt].name[0] = '\0';
   keys[keyCnt].isMaster = false;
   keyCnt++;
   saveEEPROM();
@@ -528,6 +528,15 @@ void showApply(const char* s) {
   display.display();
 }
 
+void showScanning(const char* msg) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 8);
+  display.println(msg);
+  display.println(F("Hold 2s to exit"));
+  display.display();
+}
+
 // Helper function to print hex byte
 void printHex(uint8_t b) {
   if (b < 16) display.print('0');
@@ -643,14 +652,7 @@ void loop() {
           lastTickMs = millis();
           inScanMode = true;
           busy = true;
-          
-          // Display scanning message
-          display.clearDisplay();
-          display.setTextSize(1);
-          display.setCursor(0, 8);
-          display.println(F("Scanning RW1990..."));
-          display.println(F("Hold 2s to exit"));
-          display.display();
+          showScanning(F("Scanning RW1990..."));
         }
         if (cursor == 1) { 
           mode = READ_RF; 
@@ -658,14 +660,7 @@ void loop() {
           lastTickMs = millis();
           inScanMode = true;
           busy = true;
-          
-          // Display scanning message
-          display.clearDisplay();
-          display.setTextSize(1);
-          display.setCursor(0, 8);
-          display.println(F("Scanning RF..."));
-          display.println(F("Hold 2s to exit"));
-          display.display();
+          showScanning(F("Scanning RF..."));
         }
         if (cursor == 2) { 
           mode = LIST; 
@@ -795,32 +790,17 @@ void loop() {
           tmStart = millis();  // Reset scan timeout
           lastTickMs = millis();
           inScanMode = true;
-          
-          // Display scanning message
-          display.clearDisplay();
-          display.setTextSize(1);
-          display.setCursor(0, 8);
-          display.println(F("Scanning RW1990..."));
-          display.println(F("Hold 2s to exit"));
-          display.display();
+          showScanning(F("Scanning RW1990..."));
         } else {
           mode = READ_RF;
-          tmStart = millis();  // Reset scan timeout
+          tmStart = millis();
           lastTickMs = millis();
           inScanMode = true;
-          
-          // Display scanning message
-          display.clearDisplay();
-          display.setTextSize(1);
-          display.setCursor(0, 8);
-          display.println(F("Scanning RF..."));
-          display.println(F("Hold 2s to exit"));
-          display.display();
+          showScanning(F("Scanning RF..."));
         }
         break;
       }
       
-      // Allow user to save key during display
       if (enc.click()) {
         if (addKey(tempTp, tempBuf, tempUidLen)) okBeep();
         else errBeep();
@@ -837,18 +817,13 @@ void loop() {
         
         // Display scanning message
         display.clearDisplay();
-        display.setTextSize(1);
-        display.setCursor(0, 8);
         if (tempTp == TYPE_RW1990) {
-          display.println(F("Scanning RW1990..."));
+          showScanning(F("Scanning RW1990..."));
         } else {
-          display.println(F("Scanning RF..."));
+          showScanning(F("Scanning RF..."));
         }
-        display.println(F("Hold 2s to exit"));
-        display.display();
       }
       
-      // Hold to exit to main menu
       if (enc.hold()) {
         mode = MAIN; 
         drawMain(); 
