@@ -88,6 +88,23 @@ bool busy = false;
 bool inScanMode = false;
 
 
+// Helper function to check Family/CRC errors and return error message
+const char* rw1990_check_errors(const uint8_t* buf) {
+  byte crc = ow.crc8(buf, 7);
+  bool familyOk = (buf[0] == 0x01);
+  bool crcOk = (crc == buf[7]);
+  
+  if (!familyOk && !crcOk) {
+    return "Family:ERR CRC:ERR";
+  } else if (!familyOk) {
+    return "Family:ERR";
+  } else if (!crcOk) {
+    return "CRC:ERR";
+  } else {
+    return "OK";
+  }
+}
+
 bool rw1990_read(uint8_t* buf) {
   ow.reset_search();
   noInterrupts();
@@ -108,40 +125,11 @@ bool rw1990_read(uint8_t* buf) {
   }
   Serial.print(F("| "));
   
-  // Check Family and CRC - output diagnostics
-  byte crc = ow.crc8(buf, 7);
-  bool familyOk = (buf[0] == 0x01);
-  bool crcOk = (crc == buf[7]);
-  
-  if (!familyOk && !crcOk) {
-    Serial.println(F("Family:ERR CRC:ERR"));
-  } else if (!familyOk) {
-    Serial.println(F("Family:ERR"));
-  } else if (!crcOk) {
-    Serial.println(F("CRC:ERR"));
-  } else {
-    Serial.println(F("OK"));
-  }
+  // Output error status
+  Serial.println(rw1990_check_errors(buf));
   
   // Always return true if key is found (regardless of errors)
   return true;
-}
-
-// Helper function to check Family/CRC errors and return error message
-const char* rw1990_check_errors(const uint8_t* buf) {
-  byte crc = ow.crc8(buf, 7);
-  bool familyOk = (buf[0] == 0x01);
-  bool crcOk = (crc == buf[7]);
-  
-  if (!familyOk && !crcOk) {
-    return "Family:ERR CRC:ERR";
-  } else if (!familyOk) {
-    return "Family:ERR";
-  } else if (!crcOk) {
-    return "CRC:ERR";
-  } else {
-    return "OK";
-  }
 }
 
 // Unified function: read RW1990 key and display with error status
@@ -1083,7 +1071,7 @@ void loop() {
         uint8_t cardLen = 0;
         if (rfid_read_and_display(cardBuf, &cardLen, false)) {
           display.setCursor(0, 22);
-          display.print(F("Card OK"));
+          display.print(F("Card present"));
         }
         okBeep();
       } else {
