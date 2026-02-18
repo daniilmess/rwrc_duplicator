@@ -102,7 +102,7 @@ bool rw1990_read(uint8_t* buf) {
   }
   interrupts();
   if (res) {
-    Serial.print(F("RW1990 read OK: "));
+    Serial.print(F("RW:OK "));
     for (uint8_t i = 0; i < 8; i++) {
       if (buf[i] < 16) Serial.print('0');
       Serial.print(buf[i], HEX);
@@ -110,7 +110,7 @@ bool rw1990_read(uint8_t* buf) {
     }
     Serial.println();
   } else {
-    Serial.println(F("No RW1990 or CRC error"));
+    Serial.println(F("RW:ERR"));
   }
   return res;
 }
@@ -118,17 +118,17 @@ bool rw1990_read(uint8_t* buf) {
 bool rw1990_write(const uint8_t* newID) {
   uint8_t dummy[8];
   if (!rw1990_read(dummy)) {
-    Serial.println(F("No device at start of write"));
+    Serial.println(F("RW:NODEV"));
     return false;
   }
 
-  Serial.println(F("Starting write sequence..."));
+  Serial.println(F("RW:WR"));
 
   ow.skip();
   ow.reset();
   ow.write(0x33);
 
-  Serial.print(F("ID before write: "));
+  Serial.print(F("ID: "));
   for (uint8_t i = 0; i < 8; i++) {
     uint8_t b = ow.read();
     Serial.print(b < 16 ? "0" : "");
@@ -154,7 +154,7 @@ bool rw1990_write(const uint8_t* newID) {
   ow.reset();
   ow.write(0xD5);
 
-  Serial.print(F("Writing bytes: "));
+  Serial.print(F("WR: "));
   for (uint8_t i = 0; i < 8; i++) {
     rw1990_write_byte(newID[i]);
     Serial.print('*');
@@ -175,15 +175,15 @@ bool rw1990_write(const uint8_t* newID) {
 
   delay(200);
 
-  Serial.println(F("Verifying write..."));
+  Serial.println(F("VRF"));
   uint8_t check[8];
   bool success = false;
   
   if (rw1990_read(check)) {
     success = (memcmp(check, newID, 8) == 0);
-    Serial.println(success ? F("Verify: MATCH OK") : F("Verify: Mismatch"));
+    Serial.println(success ? F("VRF:OK") : F("VRF:FAIL"));
   } else {
-    Serial.println(F("Verify: No device"));
+    Serial.println(F("VRF:NODEV"));
   }
 
   return success;
@@ -242,22 +242,7 @@ bool rw1990_erase_ff() {
 }
 
 
-void playMusic() {
-  int Ab4 = 415;
-  int C5  = 523;
-  int Eb5 = 622;
-  int E5  = 659;
 
-  tone(BUZZ, Ab4, 120); delay(160);
-  tone(BUZZ, C5,  120); delay(160);
-  tone(BUZZ, Eb5, 120); delay(160);
-  tone(BUZZ, E5,  120); delay(160);
-  tone(BUZZ, Eb5, 450); delay(180);
-  tone(BUZZ, C5,  160); delay(160);
-  tone(BUZZ, Ab4, 280); delay(400);
-
-  noTone(BUZZ);
-}
 
 
 void toneBeep(int hz, int ms) {
@@ -299,16 +284,15 @@ uint8_t detectRF() {
 }
 
 void loadMasterKeys() {
-  Serial.println(F("Loading master keys from PROGMEM..."));
+  Serial.println(F("MKEYS:LOAD"));
   keyCnt = 0;
   for (uint8_t i = 0; i < MASTER_KEYS_COUNT && keyCnt < MAX_KEYS; i++) {
     KeyRec mk;
     memcpy_P(&mk, &masterKeys[i], sizeof(KeyRec));
     keys[keyCnt++] = mk;
   }
-  Serial.print(F("Loaded "));
-  Serial.print(keyCnt);
-  Serial.println(F(" master keys"));
+  Serial.print(F("CNT:"));
+  Serial.println(keyCnt);
 }
 
 
@@ -320,12 +304,13 @@ void loadEEPROM() {
   uint8_t firstBootFlag = EEPROM.read(EEPROM_FIRST_BOOT_FLAG);
   
   if (firstBootFlag != 0x01) {
-    Serial.println(F("First boot detected - loading master keys"));
+    Serial.print(F("FirstBoot:1 keys:"));
+    Serial.println(MASTER_KEYS_COUNT);
     loadMasterKeys();
     saveEEPROM();
     EEPROM.update(EEPROM_FIRST_BOOT_FLAG, 0x01);
   } else {
-    Serial.println(F("Loading keys from EEPROM"));
+    Serial.println(F("EEPROM:LOAD"));
     keyCnt = EEPROM.read(EEPROM_KEY_COUNT);
     if (keyCnt > MAX_KEYS) keyCnt = 0;
     
@@ -335,9 +320,8 @@ void loadEEPROM() {
     }
   }
   
-  Serial.print(F("Loaded "));
-  Serial.print(keyCnt);
-  Serial.println(F(" keys"));
+  Serial.print(F("CNT:"));
+  Serial.println(keyCnt);
 }
 
 void saveEEPROM() {
@@ -361,7 +345,7 @@ bool addKey(uint8_t tp, const uint8_t* d, uint8_t len) {
 }
 
 void factoryReset() {
-  Serial.println(F("Factory reset initiated..."));
+  Serial.println(F("HARDRESET"));
   
   EEPROM.update(EEPROM_FIRST_BOOT_FLAG, 0x00);
   
@@ -388,16 +372,7 @@ void drawHeader(const char* txt) {
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 }
 
-void drawLogo() {
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setCursor(4, 4);
-  display.println(F("DUPLICATOR"));
-  display.setTextSize(1);
-  display.setCursor(12, 24);
-  display.println(F("RW1990 / RFID"));
-  display.display();
-}
+
 
 void drawMain() {
   display.clearDisplay();
@@ -474,17 +449,11 @@ void drawList() {
 }
 
 void drawSavedKeyDetail() {
-  const char* header;
-  if (keys[selKey].type == TYPE_RW1990) header = "RW1990 ID";
-  else if (keys[selKey].type == TYPE_RFID_13M) header = "RF 13.56 MHz";
-  else if (keys[selKey].type == TYPE_RFID_125K) header = "RF 125 kHz";
-  else header = "Key ID";
-  
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
-  display.println(header);
+  display.println(getKeyTypeStr(keys[selKey].type));
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
   display.setCursor(0, 12);
   
@@ -501,12 +470,7 @@ void drawSavedKeyDetail() {
   }
   
   display.setCursor(0, 24);
-  if (cursor == 0) {
-    display.print("   [Write]  Delete");
-  } else {
-    display.print("    Write  [Delete]");
-  }
-  
+  display.print(cursor == 0 ? "   [Write]  Delete" : "    Write  [Delete]");
   display.display();
 }
 
@@ -541,34 +505,39 @@ void printHex(uint8_t b) {
   display.print(b, HEX);
 }
 
-void printUID(const uint8_t* d, uint8_t len) {
-  const char* header;
-  if (tempTp == TYPE_RW1990) header = "RW1990 ID";
-  else if (tempTp == TYPE_RFID_13M) header = "RF 13.56 MHz";
-  else if (tempTp == TYPE_RFID_125K) header = "RF 125 kHz";
-  else header = "Key ID";
-  
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.println(header);
-  display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
-  display.setCursor(0, 14);
-  
-  if (tempTp == TYPE_RW1990 && len == 8) {
-    printHex(d[0]); display.print(' ');
-    printHex(d[1]); printHex(d[2]); display.print(' ');
-    printHex(d[3]); printHex(d[4]); display.print(' ');
-    printHex(d[5]); printHex(d[6]); display.print(' ');
-    printHex(d[7]);
+const char* getKeyTypeStr(uint8_t type) {
+  if (type == TYPE_RW1990) return "RW1990 ID";
+  if (type == TYPE_RFID_13M) return "RF 13.56 MHz";
+  if (type == TYPE_RFID_125K) return "RF 125 kHz";
+  return "Key ID";
+}
+
+void formatUID(uint8_t type, const uint8_t* uid, uint8_t uidLen) {
+  if (type == TYPE_RW1990 && uidLen == 8) {
+    printHex(uid[0]); display.print(' ');
+    printHex(uid[1]); printHex(uid[2]); display.print(' ');
+    printHex(uid[3]); printHex(uid[4]); display.print(' ');
+    printHex(uid[5]); printHex(uid[6]); display.print(' ');
+    printHex(uid[7]);
   } else {
-    for (uint8_t i = 0; i < len; i++) {
-      printHex(d[i]);
-      if (i < len - 1) display.print(' ');
+    for (uint8_t i = 0; i < uidLen; i++) {
+      printHex(uid[i]);
+      if (i < uidLen - 1) display.print(' ');
     }
   }
-  
+}
+
+void displayKeyUID(uint8_t type, const uint8_t* uid, uint8_t uidLen, bool showHeader) {
+  if (showHeader) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println(getKeyTypeStr(type));
+    display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  }
+  display.setCursor(0, 14);
+  formatUID(type, uid, uidLen);
   display.display();
 }
 
@@ -581,27 +550,20 @@ void setup() {
   digitalWrite(LED_G, LOW);
 
   Serial.begin(115200);
-  Serial.println(F("Duplicator started"));
-
-  delay(500);
+  Serial.println(F("START"));
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-    Serial.println(F("SSD1306 init failed! Try 0x3D"));
+    Serial.println(F("OLED:ERR"));
     while (1);
   }
 
   display.clearDisplay();
   display.display();
-  delay(100);
-
-  drawLogo();
 
   SPI.begin();
   rfid.PCD_Init();
 
-  playMusic();
-
-  delay(1500);
+  okBeep();
 
   enc.setTimeout(380);
 
@@ -704,7 +666,7 @@ void loop() {
         
         okBeep();
         
-        printUID(tempBuf, tempUidLen);
+        displayKeyUID(tempTp, tempBuf, tempUidLen, true);
         tmStart = millis();
         mode = READ_RESULT;
         inScanMode = false;
@@ -754,7 +716,7 @@ void loop() {
         
         okBeep();
         
-        printUID(tempBuf, tempUidLen);
+        displayKeyUID(tempTp, tempBuf, tempUidLen, true);
         tmStart = millis();
         mode = READ_RESULT;
         inScanMode = false;
