@@ -30,6 +30,17 @@ EncButton enc(ENC_A, ENC_B, ENC_BTN);
 
 #define MAX_KEYS   10
 
+// PROGMEM String Constants
+const char STR_RW1990_ID[] PROGMEM = "RW1990 ID";
+const char STR_RF_13M[] PROGMEM = "RF 13.56 MHz";
+const char STR_RF_125K[] PROGMEM = "RF 125 kHz";
+const char STR_KEY_ID[] PROGMEM = "Key ID";
+const char STR_SAVED_KEYS[] PROGMEM = "Saved Keys";
+const char STR_DIAGNOSTICS[] PROGMEM = "DIAGNOSTICS";
+const char STR_SCANNING_RW[] PROGMEM = "Scanning RW1990...";
+const char STR_SCANNING_RF[] PROGMEM = "Scanning RF...";
+const char STR_HOLD_EXIT[] PROGMEM = "Hold 2s to exit";
+
 enum KeyType {
   TYPE_RW1990 = 0,
   TYPE_RFID_13M = 1,
@@ -63,7 +74,12 @@ enum Mode {
   READ_RESULT,
   SAVED_DETAIL,
   CONFIRM_DELETE,
-  WRITE
+  WRITE,
+  DIAGNOSTICS,
+  DIAG_RW_CHECK,
+  DIAG_RW_RAW,
+  DIAG_RW_ERASE_FF,
+  DIAG_RF_ERASE
 };
 Mode mode = MAIN;
 
@@ -223,6 +239,42 @@ void rw1990_write_byte(uint8_t data) {
 }
 
 // ────────────────────────────────────────────────
+// Diagnostics Functions
+// ────────────────────────────────────────────────
+
+bool rw1990_check_presence() {
+  // Simple presence check without CRC verification
+  ow.reset_search();
+  noInterrupts();
+  bool present = ow.search(tempBuf);
+  if (!present) {
+    ow.reset_search();
+  }
+  interrupts();
+  return present;
+}
+
+bool rw1990_read_raw(uint8_t* buf) {
+  // Read without CRC check - get all 8 bytes as-is
+  ow.reset_search();
+  noInterrupts();
+  bool res = false;
+  if (ow.search(buf)) {
+    res = true;
+  } else {
+    ow.reset_search();
+  }
+  interrupts();
+  return res;
+}
+
+bool rw1990_erase_ff() {
+  // Write all 0xFF bytes (blank/erase)
+  uint8_t blank[8] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  return rw1990_write(blank);
+}
+
+// ────────────────────────────────────────────────
 // Музыка
 // ────────────────────────────────────────────────
 
@@ -254,27 +306,26 @@ void toneBeep(int hz, int ms) {
 
 void okBeep() {
   digitalWrite(LED_G, HIGH);
-  toneBeep(1400, 90); delay(50);
-  toneBeep(1900, 90); delay(50);
-  toneBeep(2400, 140);
+  toneBeep(1400, 100); delay(20);
+  toneBeep(1900, 100);
   delay(600);
   digitalWrite(LED_G, LOW);
 }
 
 void errBeep() {
   digitalWrite(LED_Y, HIGH);
-  toneBeep(380, 320); delay(100);
-  toneBeep(280, 380);
+  toneBeep(1900, 100); delay(20);
+  toneBeep(1400, 100);
   delay(1000);
   digitalWrite(LED_Y, LOW);
 }
 
 void tickBeep() {
   digitalWrite(LED_Y, HIGH);
-  tone(BUZZ, 200, 40);  // 200Hz, 40ms - Geiger counter style
-  delay(40);
+  tone(BUZZ, 150, 30);  // 150Hz, 30ms - short Geiger counter click
+  delay(30);
   digitalWrite(LED_Y, LOW);
-  delay(460);  // Total 500ms cycle
+  delay(470);  // Total 500ms cycle
 }
 
 // ────────────────────────────────────────────────
@@ -417,9 +468,35 @@ void drawMain() {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(4, 4); display.println(cursor == 0 ? "> Read RW1990" : "  Read RW1990");
-  display.setCursor(4, 14); display.println(cursor == 1 ? "> Read RF"   : "  Read RF");
-  display.setCursor(4, 24); display.println(cursor == 2 ? "> Saved Keys"  : "  Saved Keys");
+  display.setCursor(4, 2); display.println(cursor == 0 ? "> Read RW1990" : "  Read RW1990");
+  display.setCursor(4, 10); display.println(cursor == 1 ? "> Read RF"   : "  Read RF");
+  display.setCursor(4, 18); display.println(cursor == 2 ? "> Saved Keys"  : "  Saved Keys");
+  display.setCursor(4, 26); display.println(cursor == 3 ? "> Diagnostics" : "  Diagnostics");
+  display.display();
+}
+
+void drawDiagnostics() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println(F("DIAGNOSTICS"));
+  display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  
+  // Show up to 3 items at a time with scrolling
+  int start = max(0, min(cursor, 1)); // Start position for scrolling (max 1 since we have 4 items)
+  for (int i = 0; i < 3; i++) {
+    int idx = start + i;
+    if (idx >= 4) break; // We have 4 diagnostic options
+    display.setCursor(4, 12 + i * 8);
+    display.print(idx == cursor ? "> " : "  ");
+    
+    if (idx == 0) display.print(F("RW Check"));
+    else if (idx == 1) display.print(F("RW Read Raw"));
+    else if (idx == 2) display.print(F("RW Erase FF"));
+    else if (idx == 3) display.print(F("RF Erase"));
+  }
+  
   display.display();
 }
 
@@ -602,6 +679,39 @@ void printUID(const uint8_t* d, uint8_t len) {
   display.display();
 }
 
+// Universal UID display helper function
+void displayUID(uint8_t type, const uint8_t* uid, uint8_t uidLen, bool isRaw) {
+  if (type == TYPE_RW1990 && uidLen == 8 && !isRaw) {
+    // RW1990: show bytes with grouping
+    if (uid[0] < 16) display.print('0');
+    display.print(uid[0], HEX);
+    display.print(' ');
+    
+    for (uint8_t i = 1; i < 7; i++) {
+      if (uid[i] < 16) display.print('0');
+      display.print(uid[i], HEX);
+      if (i % 2 == 0) display.print(' ');
+    }
+    
+    if (uid[7] < 16) display.print('0');
+    display.print(uid[7], HEX);
+  } else if (type == TYPE_RW1990 && isRaw) {
+    // RW1990 raw: show all bytes simply
+    for (uint8_t i = 0; i < uidLen; i++) {
+      if (uid[i] < 16) display.print('0');
+      display.print(uid[i], HEX);
+      if (i < uidLen - 1) display.print(' ');
+    }
+  } else {
+    // RF cards: show all bytes with spaces
+    for (uint8_t i = 0; i < uidLen; i++) {
+      if (uid[i] < 16) display.print('0');
+      display.print(uid[i], HEX);
+      if (i < uidLen - 1) display.print(' ');
+    }
+  }
+}
+
 // ────────────────────────────────────────────────
  // SETUP
 // ────────────────────────────────────────────────
@@ -617,6 +727,7 @@ void setup() {
 
   delay(500);
 
+  // Initialize display first
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
     Serial.println(F("SSD1306 init failed! Try 0x3D"));
     while (1);
@@ -626,14 +737,17 @@ void setup() {
   display.display();
   delay(100);
 
+  // Show logo
   drawLogo();
 
+  // Initialize other peripherals
+  SPI.begin();
+  rfid.PCD_Init();
+
+  // Play startup sound after logo display
   playMusic();
 
   delay(1500);
-
-  SPI.begin();
-  rfid.PCD_Init();
 
   enc.setTimeout(380);
 
@@ -672,7 +786,7 @@ void loop() {
 
     case MAIN:
       if (enc.turn()) {
-        cursor = (cursor + enc.dir() + 3) % 3;
+        cursor = (cursor + enc.dir() + 4) % 4;
         drawMain();
       }
       if (enc.click()) {
@@ -710,6 +824,11 @@ void loop() {
           mode = LIST; 
           selKey = 0; 
           drawList(); 
+        }
+        if (cursor == 3) {
+          mode = DIAGNOSTICS;
+          cursor = 0;
+          drawDiagnostics();
         }
       }
       break;
@@ -820,8 +939,8 @@ void loop() {
       break;
 
     case READ_RESULT:
-      // Display result for 1 second, then return to scanning
-      if (millis() - tmStart > 1000UL) {
+      // Display result for 3 seconds, then return to scanning
+      if (millis() - tmStart > 3000UL) {
         // Return to appropriate scanning mode
         if (tempTp == TYPE_RW1990) {
           mode = READ_RW;
@@ -1049,6 +1168,312 @@ void loop() {
       delay(2200);
 
       mode = LIST; drawList(); busy = false;
+      break;
+
+    case DIAGNOSTICS:
+      if (enc.turn()) {
+        cursor = (cursor + enc.dir() + 4) % 4;
+        drawDiagnostics();
+      }
+      if (enc.click()) {
+        if (cursor == 0) {
+          mode = DIAG_RW_CHECK;
+          tmStart = millis();
+          busy = true;
+        } else if (cursor == 1) {
+          mode = DIAG_RW_RAW;
+          tmStart = millis();
+          busy = true;
+        } else if (cursor == 2) {
+          mode = DIAG_RW_ERASE_FF;
+          tmStart = millis();
+          busy = true;
+        } else if (cursor == 3) {
+          mode = DIAG_RF_ERASE;
+          tmStart = millis();
+          busy = true;
+        }
+      }
+      if (enc.hold()) {
+        mode = MAIN;
+        cursor = 0;
+        drawMain();
+      }
+      break;
+
+    case DIAG_RW_CHECK:
+      {
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println(F("RW Check"));
+        display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+        display.setCursor(0, 14);
+        display.println(F("Checking..."));
+        display.display();
+        
+        delay(300);
+        
+        bool present = rw1990_check_presence();
+        
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println(F("RW Check"));
+        display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+        display.setCursor(0, 16);
+        
+        if (present) {
+          display.println(F("RW Found!"));
+          okBeep();
+        } else {
+          display.println(F("No RW Key"));
+          errBeep();
+        }
+        
+        display.display();
+        delay(2000);
+        
+        mode = DIAGNOSTICS;
+        cursor = 0;
+        drawDiagnostics();
+        busy = false;
+      }
+      break;
+
+    case DIAG_RW_RAW:
+      {
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println(F("RW Read Raw"));
+        display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+        display.setCursor(0, 14);
+        display.println(F("Reading..."));
+        display.display();
+        
+        delay(300);
+        
+        uint8_t rawBuf[8];
+        bool found = rw1990_read_raw(rawBuf);
+        
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println(F("RW Read Raw"));
+        display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+        
+        if (found) {
+          display.setCursor(0, 12);
+          display.println(F("(no CRC check)"));
+          display.setCursor(0, 22);
+          // Display all 8 bytes
+          for (uint8_t i = 0; i < 8; i++) {
+            if (rawBuf[i] < 16) display.print('0');
+            display.print(rawBuf[i], HEX);
+            if (i < 7) display.print(' ');
+          }
+          okBeep();
+        } else {
+          display.setCursor(0, 16);
+          display.println(F("No RW Key"));
+          errBeep();
+        }
+        
+        display.display();
+        delay(3000);
+        
+        mode = DIAGNOSTICS;
+        cursor = 1;
+        drawDiagnostics();
+        busy = false;
+      }
+      break;
+
+    case DIAG_RW_ERASE_FF:
+      {
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println(F("RW Erase FF"));
+        display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+        display.setCursor(0, 14);
+        display.println(F("Place RW key..."));
+        display.display();
+        
+        // Wait for key presence (up to 5 seconds)
+        unsigned long startWait = millis();
+        bool keyPresent = false;
+        while (millis() - startWait < 5000UL) {
+          if (rw1990_check_presence()) {
+            keyPresent = true;
+            break;
+          }
+          delay(100);
+        }
+        
+        if (!keyPresent) {
+          display.clearDisplay();
+          display.setTextSize(1);
+          display.setCursor(0, 0);
+          display.println(F("RW Erase FF"));
+          display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+          display.setCursor(0, 16);
+          display.println(F("Timeout!"));
+          display.display();
+          errBeep();
+          delay(2000);
+          mode = DIAGNOSTICS;
+          cursor = 2;
+          drawDiagnostics();
+          busy = false;
+          break;
+        }
+        
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println(F("RW Erase FF"));
+        display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+        display.setCursor(0, 14);
+        display.println(F("Writing FF..."));
+        display.display();
+        
+        delay(500);
+        
+        bool success = rw1990_erase_ff();
+        
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println(F("RW Erase FF"));
+        display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+        display.setCursor(0, 16);
+        
+        if (success) {
+          display.println(F("Erased OK!"));
+          okBeep();
+        } else {
+          display.println(F("Erase failed!"));
+          errBeep();
+        }
+        
+        display.display();
+        delay(2000);
+        
+        mode = DIAGNOSTICS;
+        cursor = 2;
+        drawDiagnostics();
+        busy = false;
+      }
+      break;
+
+    case DIAG_RF_ERASE:
+      {
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println(F("RF Erase"));
+        display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+        display.setCursor(0, 14);
+        display.println(F("Place RF card..."));
+        display.display();
+        
+        // Wait for card presence (up to 5 seconds)
+        unsigned long startWait = millis();
+        bool cardPresent = false;
+        while (millis() - startWait < 5000UL) {
+          if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+            cardPresent = true;
+            break;
+          }
+          delay(100);
+        }
+        
+        if (!cardPresent) {
+          display.clearDisplay();
+          display.setTextSize(1);
+          display.setCursor(0, 0);
+          display.println(F("RF Erase"));
+          display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+          display.setCursor(0, 16);
+          display.println(F("Timeout!"));
+          display.display();
+          errBeep();
+          delay(2000);
+          mode = DIAGNOSTICS;
+          cursor = 3;
+          drawDiagnostics();
+          busy = false;
+          break;
+        }
+        
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println(F("RF Erase"));
+        display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+        display.setCursor(0, 14);
+        display.println(F("Erasing..."));
+        display.display();
+        
+        delay(500);
+        
+        // Try to erase user sectors (sectors 1-15, skipping sector 0)
+        // This is for Mifare Classic 1K cards
+        bool success = true;
+        MFRC522::StatusCode status;
+        byte zeros[16] = {0};
+        
+        // Default key for blank Chinese cards
+        MFRC522::MIFARE_Key key;
+        for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
+        
+        // Try to write zeros to a few test sectors
+        for (byte sector = 1; sector < 4 && success; sector++) {
+          byte blockAddr = sector * 4;
+          
+          // Authenticate
+          status = rfid.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, &key, &(rfid.uid));
+          if (status != MFRC522::STATUS_OK) {
+            success = false;
+            break;
+          }
+          
+          // Write zeros to first block of sector
+          status = rfid.MIFARE_Write(blockAddr, zeros, 16);
+          if (status != MFRC522::STATUS_OK) {
+            success = false;
+            break;
+          }
+        }
+        
+        rfid.PICC_HaltA();
+        rfid.PCD_StopCrypto1();
+        
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println(F("RF Erase"));
+        display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+        display.setCursor(0, 16);
+        
+        if (success) {
+          display.println(F("Erased OK!"));
+          okBeep();
+        } else {
+          display.println(F("(Protected?)"));
+          errBeep();
+        }
+        
+        display.display();
+        delay(2000);
+        
+        mode = DIAGNOSTICS;
+        cursor = 3;
+        drawDiagnostics();
+        busy = false;
+      }
       break;
   }
 }
