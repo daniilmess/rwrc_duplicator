@@ -52,7 +52,8 @@ uint8_t keyCnt = 0;
 const KeyRec PROGMEM masterKeys[] = {
   {TYPE_RW1990, {0x01, 0xCA, 0xC9, 0xAF, 0x02, 0x00, 0x00, 0xC0}, 8, "home_78", true},
   {TYPE_RFID_13M, {0x04, 0xA1, 0xB2, 0xC3, 0x00, 0x00, 0x00, 0x00}, 4, "office_card", true},
-  {TYPE_RFID_125K, {0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x00, 0x00, 0x00}, 5, "garage_fob", true}
+  {TYPE_RFID_125K, {0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x00, 0x00, 0x00}, 5, "garage_fob", true},
+  {TYPE_RW1990, {0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x2F}, 8, "RW_erase", true}
 };
 const uint8_t MASTER_KEYS_COUNT = sizeof(masterKeys) / sizeof(masterKeys[0]);
 
@@ -66,9 +67,6 @@ enum Mode {
   CONFIRM_DELETE,
   WRITE,
   DIAGNOSTICS,
-  DIAG_RW_CHECK,
-  DIAG_RW_RAW,
-  DIAG_RW_ERASE_FF,
   DIAG_RF_ERASE
 };
 Mode mode = MAIN;
@@ -93,35 +91,57 @@ bool inScanMode = false;
 bool rw1990_read(uint8_t* buf) {
   ow.reset_search();
   noInterrupts();
-  bool res = false;
-  if (ow.search(buf)) {
-    byte crc = ow.crc8(buf, 7);
-    if (crc == buf[7]) res = true;
-  } else {
-    ow.reset_search();
-  }
+  bool found = ow.search(buf);
   interrupts();
-  if (res) {
-    Serial.print(F("RW:OK "));
-    for (uint8_t i = 0; i < 8; i++) {
-      if (buf[i] < 16) Serial.print('0');
-      Serial.print(buf[i], HEX);
-      Serial.print(' ');
-    }
-    Serial.println();
-  } else {
-    Serial.println(F("RW:ERR"));
+  
+  if (!found) {
+    Serial.println(F("RW:NODEV"));
+    return false;
   }
-  return res;
+  
+  // Output bytes ALWAYS
+  Serial.print(F("RW:"));
+  for (uint8_t i = 0; i < 8; i++) {
+    if (buf[i] < 16) Serial.print('0');
+    Serial.print(buf[i], HEX);
+    Serial.print(' ');
+  }
+  Serial.print(F("| "));
+  
+  // Check Family and CRC
+  byte crc = ow.crc8(buf, 7);
+  bool familyOk = (buf[0] == 0x01);
+  bool crcOk = (crc == buf[7]);
+  
+  if (!familyOk && !crcOk) {
+    Serial.println(F("Family:ERR CRC:ERR"));
+    return false;
+  } else if (!familyOk) {
+    Serial.println(F("Family:ERR"));
+    return false;
+  } else if (!crcOk) {
+    Serial.println(F("CRC:ERR"));
+    return false;
+  } else {
+    Serial.println(F("OK"));
+    return true;
+  }
 }
 
 bool rw1990_write(const uint8_t* newID) {
   uint8_t dummy[8];
-  if (!rw1990_read(dummy)) {
+  // Check if device present (will output diagnostics, may return false for broken keys)
+  ow.reset_search();
+  noInterrupts();
+  bool deviceFound = ow.search(dummy);
+  interrupts();
+  
+  if (!deviceFound) {
     Serial.println(F("RW:NODEV"));
     return false;
   }
-
+  
+  // Device present, proceed with write (works even for broken keys)
   Serial.println(F("RW:WR"));
 
   ow.skip();
@@ -210,40 +230,6 @@ void rw1990_write_byte(uint8_t data) {
     data >>= 1;
   }
 }
-
-
-bool rw1990_check_presence() {
-  ow.reset_search();
-  noInterrupts();
-  bool present = ow.search(tempBuf);
-  if (!present) {
-    ow.reset_search();
-  }
-  interrupts();
-  return present;
-}
-
-bool rw1990_read_raw(uint8_t* buf) {
-  ow.reset_search();
-  noInterrupts();
-  bool res = false;
-  if (ow.search(buf)) {
-    res = true;
-  } else {
-    ow.reset_search();
-  }
-  interrupts();
-  return res;
-}
-
-bool rw1990_erase_ff() {
-  uint8_t blank[8] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-  return rw1990_write(blank);
-}
-
-
-
-
 
 void toneBeep(int hz, int ms) {
   tone(BUZZ, hz, ms);
@@ -393,18 +379,8 @@ void drawDiagnostics() {
   display.println(F("DIAG"));
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
   
-  int start = max(0, min(cursor, 1));
-  for (int i = 0; i < 3; i++) {
-    int idx = start + i;
-    if (idx >= 4) break;
-    display.setCursor(4, 12 + i * 8);
-    display.print(idx == cursor ? "> " : "  ");
-    
-    if (idx == 0) display.print(F("RW Chk"));
-    else if (idx == 1) display.print(F("RW Raw"));
-    else if (idx == 2) display.print(F("RW Erase"));
-    else if (idx == 3) display.print(F("RF Erase"));
-  }
+  display.setCursor(4, 12);
+  display.print(cursor == 0 ? "> RF Erase" : "  RF Erase");
   
   display.display();
 }
@@ -888,8 +864,11 @@ void loop() {
         
         bool devicePresent = false;
         if (tempTp == TYPE_RW1990) {
-          uint8_t presenceCheckBuf[8];
-          devicePresent = rw1990_read(presenceCheckBuf);
+          // Check for device presence (allow broken keys too)
+          ow.reset_search();
+          noInterrupts();
+          devicePresent = ow.search(tempBuf);
+          interrupts();
         } else {
           devicePresent = rfid.PICC_IsNewCardPresent();
         }
@@ -933,152 +912,16 @@ void loop() {
     }
 
     case DIAGNOSTICS: {
-      if (enc.turn()) {
-        cursor = (cursor + enc.dir() + 4) % 4;
-        drawDiagnostics();
-      }
       if (enc.click()) {
-        if (cursor == 0) {
-          mode = DIAG_RW_CHECK;
-          tmStart = millis();
-          busy = true;
-        } else if (cursor == 1) {
-          mode = DIAG_RW_RAW;
-          tmStart = millis();
-          busy = true;
-        } else if (cursor == 2) {
-          mode = DIAG_RW_ERASE_FF;
-          tmStart = millis();
-          busy = true;
-        } else if (cursor == 3) {
-          mode = DIAG_RF_ERASE;
-          tmStart = millis();
-          busy = true;
-        }
+        mode = DIAG_RF_ERASE;
+        tmStart = millis();
+        busy = true;
       }
       if (enc.hold()) {
         mode = MAIN;
         cursor = 0;
         drawMain();
       }
-      break;
-    }
-
-    case DIAG_RW_CHECK: {
-      diagHeader(F("RW Chk"));
-      display.setCursor(0, 14);
-      display.println(F("Check..."));
-      display.display();
-      
-      delay(300);
-      
-      bool present = rw1990_check_presence();
-      
-      diagHeader(F("RW Chk"));
-      display.setCursor(0, 16);
-      
-      if (present) {
-        display.println(F("Found!"));
-        okBeep();
-      } else {
-        display.println(F("No Key"));
-        errBeep();
-      }
-      
-      display.display();
-      delay(2000);
-      
-      returnToDiagnostics(0);
-      break;
-    }
-
-    case DIAG_RW_RAW: {
-      diagHeader(F("RW Raw"));
-      display.setCursor(0, 14);
-      display.println(F("Read..."));
-      display.display();
-      
-      delay(300);
-      
-      uint8_t rawBuf[8];
-      bool found = rw1990_read_raw(rawBuf);
-      
-      diagHeader(F("RW Raw"));
-      
-      if (found) {
-        display.setCursor(0, 12);
-        display.println(F("(no CRC)"));
-        display.setCursor(0, 22);
-        for (uint8_t i = 0; i < 8; i++) {
-          if (rawBuf[i] < 16) display.print('0');
-          display.print(rawBuf[i], HEX);
-          if (i < 7) display.print(' ');
-        }
-        okBeep();
-      } else {
-        display.setCursor(0, 16);
-        display.println(F("No Key"));
-        errBeep();
-      }
-      
-      display.display();
-      delay(2000);
-      
-      returnToDiagnostics(1);
-      break;
-    }
-
-    case DIAG_RW_ERASE_FF: {
-      diagHeader(F("RW Erase"));
-      display.setCursor(0, 14);
-      display.println(F("Place key..."));
-      display.display();
-      
-      unsigned long startWait = millis();
-      bool keyPresent = false;
-      while (millis() - startWait < 5000UL) {
-        if (rw1990_check_presence()) {
-          keyPresent = true;
-          break;
-        }
-        delay(100);
-      }
-      
-      if (!keyPresent) {
-        diagHeader(F("RW Erase"));
-        display.setCursor(0, 16);
-        display.println(F("Timeout"));
-        display.display();
-        errBeep();
-        delay(2000);
-        returnToDiagnostics(2);
-        break;
-      }
-      
-      diagHeader(F("RW Erase"));
-      display.setCursor(0, 14);
-      display.println(F("Write FF..."));
-      display.display();
-      
-      delay(500);
-      
-      bool success = rw1990_erase_ff();
-      
-      diagHeader(F("RW Erase"));
-      display.setCursor(0, 16);
-      
-      if (success) {
-        display.println(F("OK!"));
-        okBeep();
-      } else {
-        display.println(F("Failed"));
-        errBeep();
-      }
-      
-      display.display();
-      delay(2000);
-      
-      returnToDiagnostics(2);
       break;
     }
 
@@ -1105,7 +948,7 @@ void loop() {
         display.display();
         errBeep();
         delay(2000);
-        returnToDiagnostics(3);
+        returnToDiagnostics(0);
         break;
       }
       
@@ -1156,7 +999,7 @@ void loop() {
       display.display();
       delay(2000);
       
-      returnToDiagnostics(3);
+      returnToDiagnostics(0);
       break;
     }
   }
