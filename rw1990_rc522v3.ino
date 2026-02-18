@@ -29,6 +29,7 @@ EncButton enc(ENC_A, ENC_B, ENC_BTN);
 #define BUZZ       A1
 
 #define MAX_KEYS   10
+#define RW1990_UID_SIZE 8
 
 
 
@@ -40,7 +41,7 @@ enum KeyType {
 
 struct KeyRec {
   uint8_t  type;
-  uint8_t  uid[8];
+  uint8_t  uid[RW1990_UID_SIZE];
   uint8_t  uidLen;
   char     name[16];
   bool     isMaster;
@@ -50,10 +51,10 @@ KeyRec keys[MAX_KEYS];
 uint8_t keyCnt = 0;
 
 const KeyRec PROGMEM masterKeys[] = {
-  {TYPE_RW1990, {0x01, 0xCA, 0xC9, 0xAF, 0x02, 0x00, 0x00, 0xC0}, 8, "home_78", true},
+  {TYPE_RW1990, {0x01, 0xCA, 0xC9, 0xAF, 0x02, 0x00, 0x00, 0xC0}, RW1990_UID_SIZE, "home_78", true},
   {TYPE_RFID_13M, {0x04, 0xA1, 0xB2, 0xC3, 0x00, 0x00, 0x00, 0x00}, 4, "office_card", true},
   {TYPE_RFID_125K, {0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x00, 0x00, 0x00}, 5, "garage_fob", true},
-  {TYPE_RW1990, {0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x2F}, 8, "RW_erase", true}
+  {TYPE_RW1990, {0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x2F}, RW1990_UID_SIZE, "RW_erase", true}
 };
 const uint8_t MASTER_KEYS_COUNT = sizeof(masterKeys) / sizeof(masterKeys[0]);
 
@@ -75,7 +76,7 @@ int cursor = 0;
 int selKey = 0;
 bool deleteConfirm = false;
 
-uint8_t tempBuf[8];
+uint8_t tempBuf[RW1990_UID_SIZE];
 uint8_t tempTp = 0;
 uint8_t tempUidLen = 0;
 
@@ -118,7 +119,7 @@ bool rw1990_read(uint8_t* buf) {
   
   // Output bytes ALWAYS
   Serial.print(F("RW:"));
-  for (uint8_t i = 0; i < 8; i++) {
+  for (uint8_t i = 0; i < RW1990_UID_SIZE; i++) {
     if (buf[i] < 16) Serial.print('0');
     Serial.print(buf[i], HEX);
     Serial.print(' ');
@@ -150,7 +151,7 @@ bool rw1990_read_and_display(uint8_t* buf, bool clearAndDraw) {
   
   // Display UID
   display.setCursor(0, 14);
-  formatUID(TYPE_RW1990, buf, 8);
+  formatUID(TYPE_RW1990, buf, RW1990_UID_SIZE);
   
   // Display error status on next line
   display.setCursor(0, 24);
@@ -166,7 +167,7 @@ bool rfid_read_and_display(uint8_t* buf, uint8_t* uidLen, bool clearAndDraw) {
     return false;  // No card found
   }
   
-  *uidLen = min(rfid.uid.size, (uint8_t)8);
+  *uidLen = min(rfid.uid.size, (uint8_t)RW1990_UID_SIZE);
   memcpy(buf, rfid.uid.uidByte, *uidLen);
   rfid.PICC_HaltA();
   
@@ -188,7 +189,7 @@ bool rfid_read_and_display(uint8_t* buf, uint8_t* uidLen, bool clearAndDraw) {
 }
 
 bool rw1990_write(const uint8_t* newID) {
-  uint8_t dummy[8];
+  uint8_t dummy[RW1990_UID_SIZE];
   // Check if device present (will output diagnostics, may return false for broken keys)
   ow.reset_search();
   noInterrupts();
@@ -208,7 +209,7 @@ bool rw1990_write(const uint8_t* newID) {
   ow.write(0x33);
 
   Serial.print(F("ID: "));
-  for (uint8_t i = 0; i < 8; i++) {
+  for (uint8_t i = 0; i < RW1990_UID_SIZE; i++) {
     uint8_t b = ow.read();
     Serial.print(b < 16 ? "0" : "");
     Serial.print(b, HEX);
@@ -234,7 +235,7 @@ bool rw1990_write(const uint8_t* newID) {
   ow.write(0xD5);
 
   Serial.print(F("WR: "));
-  for (uint8_t i = 0; i < 8; i++) {
+  for (uint8_t i = 0; i < RW1990_UID_SIZE; i++) {
     rw1990_write_byte(newID[i]);
     Serial.print('*');
   }
@@ -255,11 +256,11 @@ bool rw1990_write(const uint8_t* newID) {
   delay(200);
 
   Serial.println(F("VRF"));
-  uint8_t check[8];
+  uint8_t check[RW1990_UID_SIZE];
   bool success = false;
   
   if (rw1990_read(check)) {
-    success = (memcmp(check, newID, 8) == 0);
+    success = (memcmp(check, newID, RW1990_UID_SIZE) == 0);
     Serial.println(success ? F("VRF:OK") : F("VRF:FAIL"));
   } else {
     Serial.println(F("VRF:NODEV"));
@@ -372,7 +373,7 @@ void saveEEPROM() {
 bool addKey(uint8_t tp, const uint8_t* d, uint8_t len) {
   if (keyCnt >= MAX_KEYS) return false;
   keys[keyCnt].type = tp;
-  memcpy(keys[keyCnt].uid, d, 8);
+  memcpy(keys[keyCnt].uid, d, RW1990_UID_SIZE);
   keys[keyCnt].uidLen = len;
   keys[keyCnt].name[0] = '\0';
   keys[keyCnt].isMaster = false;
@@ -505,7 +506,7 @@ void drawSavedKeyDetail() {
       if (j < 6 && j % 2 == 1) display.print(' ');
     }
   } else {
-    for (uint8_t j = 0; j < keys[selKey].uidLen && j < 8; j++) {
+    for (uint8_t j = 0; j < keys[selKey].uidLen && j < RW1990_UID_SIZE; j++) {
       printHex(keys[selKey].uid[j]);
       if (j < keys[selKey].uidLen - 1) display.print(' ');
     }
@@ -834,7 +835,7 @@ void loop() {
         if (cursor == 0) {  // Write
           tempTp = keys[selKey].type;
           tempUidLen = keys[selKey].uidLen;
-          memcpy(tempBuf, keys[selKey].uid, 8);
+          memcpy(tempBuf, keys[selKey].uid, RW1990_UID_SIZE);
           mode = WRITE;
           tmStart = millis();
           lastBeepMs = 0;  // Reset beep tracking
@@ -940,10 +941,10 @@ void loop() {
         res = rw1990_write(tempBuf);
         
         // After write, read and display the result
-        uint8_t readBuf[8];
+        uint8_t readBuf[RW1990_UID_SIZE];
         if (rw1990_read_and_display(readBuf, true)) {
           // Check if write was successful
-          if (memcmp(readBuf, tempBuf, 8) == 0) {
+          if (memcmp(readBuf, tempBuf, RW1990_UID_SIZE) == 0) {
             okBeep();
           } else {
             errBeep();
@@ -959,7 +960,7 @@ void loop() {
         }
       } else {
         if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
-          res = (memcmp(rfid.uid.uidByte, tempBuf, min(rfid.uid.size, (size_t)8)) == 0);
+          res = (memcmp(rfid.uid.uidByte, tempBuf, min(rfid.uid.size, (size_t)RW1990_UID_SIZE)) == 0);
           rfid.PICC_HaltA();
         }
         
@@ -1067,7 +1068,7 @@ void loop() {
         display.println(F("OK!"));
         
         // Try to read the card again to show final state
-        uint8_t cardBuf[8];
+        uint8_t cardBuf[RW1990_UID_SIZE];
         uint8_t cardLen = 0;
         if (rfid_read_and_display(cardBuf, &cardLen, false)) {
           display.setCursor(0, 22);
