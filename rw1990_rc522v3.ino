@@ -108,24 +108,95 @@ bool rw1990_read(uint8_t* buf) {
   }
   Serial.print(F("| "));
   
-  // Check Family and CRC
+  // Check Family and CRC - output diagnostics
   byte crc = ow.crc8(buf, 7);
   bool familyOk = (buf[0] == 0x01);
   bool crcOk = (crc == buf[7]);
   
   if (!familyOk && !crcOk) {
     Serial.println(F("Family:ERR CRC:ERR"));
-    return false;
   } else if (!familyOk) {
     Serial.println(F("Family:ERR"));
-    return false;
   } else if (!crcOk) {
     Serial.println(F("CRC:ERR"));
-    return false;
   } else {
     Serial.println(F("OK"));
-    return true;
   }
+  
+  // Always return true if key is found (regardless of errors)
+  return true;
+}
+
+// Helper function to check Family/CRC errors and return error message
+const char* rw1990_check_errors(const uint8_t* buf) {
+  byte crc = ow.crc8(buf, 7);
+  bool familyOk = (buf[0] == 0x01);
+  bool crcOk = (crc == buf[7]);
+  
+  if (!familyOk && !crcOk) {
+    return "Family:ERR CRC:ERR";
+  } else if (!familyOk) {
+    return "Family:ERR";
+  } else if (!crcOk) {
+    return "CRC:ERR";
+  } else {
+    return "OK";
+  }
+}
+
+// Unified function: read RW1990 key and display with error status
+bool rw1990_read_and_display(uint8_t* buf, bool clearAndDraw) {
+  if (!rw1990_read(buf)) {
+    return false;  // No key found
+  }
+  
+  // Key found - display it with error status
+  if (clearAndDraw) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println(F("RW1990 ID"));
+    display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  }
+  
+  // Display UID
+  display.setCursor(0, 14);
+  formatUID(TYPE_RW1990, buf, 8);
+  
+  // Display error status on next line
+  display.setCursor(0, 24);
+  display.print(rw1990_check_errors(buf));
+  
+  display.display();
+  return true;
+}
+
+// Unified function: read RF card and display
+bool rfid_read_and_display(uint8_t* buf, uint8_t* uidLen, bool clearAndDraw) {
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+    return false;  // No card found
+  }
+  
+  *uidLen = min(rfid.uid.size, (uint8_t)8);
+  memcpy(buf, rfid.uid.uidByte, *uidLen);
+  rfid.PICC_HaltA();
+  
+  // Card found - display it
+  if (clearAndDraw) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println(F("RF 13.56 MHz"));
+    display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  }
+  
+  display.setCursor(0, 14);
+  formatUID(TYPE_RFID_13M, buf, *uidLen);
+  display.display();
+  
+  return true;
 }
 
 bool rw1990_write(const uint8_t* newID) {
@@ -638,14 +709,13 @@ void loop() {
         lastTickMs = millis();
       }
 
-      // Try to read RW1990
-      if (rw1990_read(tempBuf)) {
+      // Try to read and display RW1990 using unified function
+      if (rw1990_read_and_display(tempBuf, true)) {
         tempTp = TYPE_RW1990;
         tempUidLen = 8;
         
         okBeep();
         
-        displayKeyUID(tempTp, tempBuf, tempUidLen, true);
         tmStart = millis();
         mode = READ_RESULT;
         inScanMode = false;
@@ -686,16 +756,12 @@ void loop() {
         lastTickMs = millis();
       }
 
-      // Try to detect RF card
-      if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+      // Try to read and display RF card using unified function
+      if (rfid_read_and_display(tempBuf, &tempUidLen, true)) {
         tempTp = TYPE_RFID_13M;
-        tempUidLen = min(rfid.uid.size, (uint8_t)8);
-        memcpy(tempBuf, rfid.uid.uidByte, tempUidLen);
-        rfid.PICC_HaltA();
         
         okBeep();
         
-        displayKeyUID(tempTp, tempBuf, tempUidLen, true);
         tmStart = millis();
         mode = READ_RESULT;
         inScanMode = false;
@@ -884,27 +950,52 @@ void loop() {
 
       if (tempTp == TYPE_RW1990) {
         res = rw1990_write(tempBuf);
+        
+        // After write, read and display the result
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setCursor(0, 8);
+        
+        uint8_t readBuf[8];
+        if (rw1990_read_and_display(readBuf, false)) {
+          // Check if write was successful
+          if (memcmp(readBuf, tempBuf, 8) == 0) {
+            okBeep();
+            display.setCursor(0, 8);
+            display.println("RW OK");
+          } else {
+            errBeep();
+            display.setCursor(0, 8);
+            display.println("WR:FAIL");
+          }
+        } else {
+          errBeep();
+          display.setCursor(0, 8);
+          display.println("WR:FAIL");
+          display.println("CHK:FAIL");
+        }
+        display.display();
       } else {
         if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
           res = (memcmp(rfid.uid.uidByte, tempBuf, min(rfid.uid.size, (size_t)8)) == 0);
           rfid.PICC_HaltA();
         }
+        
+        display.clearDisplay();
+        display.setCursor(0, 8);
+        if (res) {
+          okBeep();
+          if (tempTp == TYPE_RFID_13M) display.println("RF13 OK");
+          else if (tempTp == TYPE_RFID_125K) display.println("RF125 OK");
+          display.println("CHK:PASS");
+        } else {
+          errBeep();
+          display.println("WR:FAIL");
+          display.println("CHK:FAIL");
+        }
+        display.display();
       }
-
-      display.clearDisplay();
-      display.setCursor(0, 8);
-      if (res) {
-        okBeep();
-        if (tempTp == TYPE_RW1990) display.println("RW OK");
-        else if (tempTp == TYPE_RFID_13M) display.println("RF13 OK");
-        else if (tempTp == TYPE_RFID_125K) display.println("RF125 OK");
-        display.println("CHK:PASS");
-      } else {
-        errBeep();
-        display.println("WR:FAIL");
-        display.println("CHK:FAIL");
-      }
-      display.display();
+      
       delay(1800);
 
       mode = LIST; drawList(); busy = false;
@@ -985,11 +1076,21 @@ void loop() {
       rfid.PICC_HaltA();
       rfid.PCD_StopCrypto1();
       
+      // After erasing, read and display card state
+      delay(200);
       diagHeader(F("RF Erase"));
-      display.setCursor(0, 16);
+      display.setCursor(0, 14);
       
       if (success) {
         display.println(F("OK!"));
+        
+        // Try to read the card again to show final state
+        uint8_t cardBuf[8];
+        uint8_t cardLen = 0;
+        if (rfid_read_and_display(cardBuf, &cardLen, false)) {
+          display.setCursor(0, 22);
+          display.print(F("Card OK"));
+        }
         okBeep();
       } else {
         display.println(F("Protect?"));
