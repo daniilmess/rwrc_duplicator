@@ -171,7 +171,16 @@ bool rw1990_read_and_display(uint8_t* buf, bool clearAndDraw) {
   
   // Display error status on next line
   display.setCursor(0, 24);
-  display.print(rw1990_check_errors(buf));
+  display.print(F(" | "));
+  const char* errorStatus = rw1990_check_errors(buf);
+  display.print(errorStatus);
+  
+  // Play beep based on error status
+  if (strcmp(errorStatus, "OK") == 0) {
+    okBeep();
+  } else {
+    errBeep();
+  }
   
   display.display();
   return true;
@@ -227,19 +236,6 @@ bool rw1990_write(const uint8_t* newID) {
   
   // Device present, proceed with write (works even for broken keys)
   Serial.println(F("RW:WR"));
-
-  ow.skip();
-  ow.reset();
-  ow.write(0x33);
-
-  Serial.print(F("ID: "));
-  for (uint8_t i = 0; i < RW1990_UID_SIZE; i++) {
-    uint8_t b = ow.read();
-    Serial.print(b < 16 ? "0" : "");
-    Serial.print(b, HEX);
-    Serial.print(' ');
-  }
-  Serial.println();
 
   ow.skip();
   ow.reset();
@@ -727,8 +723,6 @@ void loop() {
         tempTp = TYPE_RW1990;
         tempUidLen = RW1990_UID_SIZE;
         
-        okBeep();
-        
         tmStart = millis();
         mode = READ_RESULT;
         inScanMode = false;
@@ -967,13 +961,20 @@ void loop() {
         // After write, read and display the result
         uint8_t readBuf[RW1990_UID_SIZE];
         if (rw1990_read_and_display(readBuf, true)) {
-          // Check if write was successful
-          if (memcmp(readBuf, tempBuf, RW1990_UID_SIZE) == 0) {
-            okBeep();
-          } else {
-            errBeep();
+          // rw1990_read_and_display() has already shown the result and played appropriate beep
+          // Just check if data matches what we wrote
+          if (memcmp(readBuf, tempBuf, RW1990_UID_SIZE) != 0) {
+            // Data mismatch - write failed, show error overlay
+            delay(1000);
+            display.clearDisplay();
+            display.setTextSize(1);
+            display.setCursor(0, 8);
+            display.println(F("WR:FAIL"));
+            display.println(F("Data mismatch"));
+            display.display();
           }
         } else {
+          // No device found after write
           errBeep();
           display.clearDisplay();
           display.setTextSize(1);
