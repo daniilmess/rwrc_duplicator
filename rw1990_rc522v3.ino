@@ -238,7 +238,7 @@ bool rw1990_write(const uint8_t* newID) {
   // Device present, proceed with write (works even for broken keys)
   Serial.println(F("RW:WR"));
 
-  // Read old ID first using 0x33 command (required for broken keys)
+  // Read old ID first using 0x33 command (works with all keys, required for broken keys to write successfully)
   ow.skip();
   ow.reset();
   ow.write(0x33);
