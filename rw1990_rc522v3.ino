@@ -372,6 +372,14 @@ void drawHeader(const char* txt) {
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 }
 
+void diagHeader(const __FlashStringHelper* title) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println(title);
+  display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+}
+
 
 
 void drawMain() {
@@ -962,11 +970,7 @@ void loop() {
     }
 
     case DIAG_RW_CHECK: {
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.println(F("RW Chk"));
-      display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+      diagHeader(F("RW Chk"));
       display.setCursor(0, 14);
       display.println(F("Check..."));
       display.display();
@@ -975,11 +979,7 @@ void loop() {
       
       bool present = rw1990_check_presence();
       
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.println(F("RW Chk"));
-      display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+      diagHeader(F("RW Chk"));
       display.setCursor(0, 16);
       
       if (present) {
@@ -1001,11 +1001,7 @@ void loop() {
     }
 
     case DIAG_RW_RAW: {
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.println(F("RW Raw"));
-      display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+      diagHeader(F("RW Raw"));
       display.setCursor(0, 14);
       display.println(F("Read..."));
       display.display();
@@ -1015,11 +1011,7 @@ void loop() {
       uint8_t rawBuf[8];
       bool found = rw1990_read_raw(rawBuf);
       
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.println(F("RW Raw"));
-      display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+      diagHeader(F("RW Raw"));
       
       if (found) {
         display.setCursor(0, 12);
@@ -1048,11 +1040,7 @@ void loop() {
     }
 
     case DIAG_RW_ERASE_FF: {
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.println(F("RW Erase"));
-      display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+      diagHeader(F("RW Erase"));
       display.setCursor(0, 14);
       display.println(F("Place key..."));
       display.display();
@@ -1068,11 +1056,7 @@ void loop() {
       }
       
       if (!keyPresent) {
-        display.clearDisplay();
-        display.setTextSize(1);
-        display.setCursor(0, 0);
-        display.println(F("RW Erase"));
-        display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+        diagHeader(F("RW Erase"));
         display.setCursor(0, 16);
         display.println(F("Timeout"));
         display.display();
@@ -1085,11 +1069,7 @@ void loop() {
         break;
       }
       
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.println(F("RW Erase"));
-      display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+      diagHeader(F("RW Erase"));
       display.setCursor(0, 14);
       display.println(F("Write FF..."));
       display.display();
@@ -1098,11 +1078,7 @@ void loop() {
       
       bool success = rw1990_erase_ff();
       
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.println(F("RW Erase"));
-      display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+      diagHeader(F("RW Erase"));
       display.setCursor(0, 16);
       
       if (success) {
@@ -1124,11 +1100,7 @@ void loop() {
     }
 
     case DIAG_RF_ERASE: {
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.println(F("RF Erase"));
-      display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+      diagHeader(F("RF Erase"));
       display.setCursor(0, 14);
       display.println(F("Place card..."));
       display.display();
@@ -1144,11 +1116,7 @@ void loop() {
       }
       
       if (!cardPresent) {
-        display.clearDisplay();
-        display.setTextSize(1);
-        display.setCursor(0, 0);
-        display.println(F("RF Erase"));
-        display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+        diagHeader(F("RF Erase"));
         display.setCursor(0, 16);
         display.println(F("Timeout"));
         display.display();
@@ -1161,11 +1129,7 @@ void loop() {
         break;
       }
       
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.println(F("RF Erase"));
-      display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+      diagHeader(F("RF Erase"));
       display.setCursor(0, 14);
       display.println(F("Erase..."));
       display.display();
@@ -1198,11 +1162,7 @@ void loop() {
       rfid.PICC_HaltA();
       rfid.PCD_StopCrypto1();
       
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.println(F("RF Erase"));
-      display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+      diagHeader(F("RF Erase"));
       display.setCursor(0, 16);
       
       if (success) {
