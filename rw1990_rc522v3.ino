@@ -60,8 +60,7 @@ const uint8_t MASTER_KEYS_COUNT = sizeof(masterKeys) / sizeof(masterKeys[0]);
 
 enum Mode {
   MAIN,
-  READ_RW,
-  READ_RF,
+  READ_KEY,
   LIST,
   READ_RESULT,
   SAVED_DETAIL,
@@ -133,7 +132,7 @@ bool rw1990_read(uint8_t* buf) {
     Serial.print(buf[i], HEX);
     Serial.print(' ');
   }
-  Serial.print(F("| "));
+  Serial.print(F("|"));
   
   // Output error status
   Serial.println(rw1990_check_errors(buf));
@@ -171,7 +170,7 @@ bool rw1990_read_and_display(uint8_t* buf, bool clearAndDraw) {
   
   // Display error status on next line
   display.setCursor(0, 24);
-  display.print(F(" | "));
+  display.print(F(" |"));
   const char* errorStatus = rw1990_check_errors(buf);
   display.print(errorStatus);
   
@@ -218,6 +217,8 @@ bool rfid_read_and_display(uint8_t* buf, uint8_t* uidLen, bool clearAndDraw) {
   formatUID(TYPE_RFID_13M, buf, *uidLen);
   display.display();
   
+  okBeep();
+  
   return true;
 }
 
@@ -237,6 +238,22 @@ bool rw1990_write(const uint8_t* newID) {
   // Device present, proceed with write (works even for broken keys)
   Serial.println(F("RW:WR"));
 
+  // Read old ID first using 0x33 command (works with all keys, required for broken keys to write successfully)
+  ow.skip();
+  ow.reset();
+  ow.write(0x33);
+  
+  // Read and output old ID
+  Serial.print(F("ID: "));
+  for (uint8_t i = 0; i < RW1990_UID_SIZE; i++) {
+    uint8_t b = ow.read();
+    Serial.print(b < 16 ? "0" : "");
+    Serial.print(b, HEX);
+    Serial.print(' ');
+  }
+  Serial.println();
+
+  // Now proceed with write sequence
   ow.skip();
   ow.reset();
   ow.write(0xD1);
@@ -444,10 +461,9 @@ void drawMain() {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(4, 2); display.println(cursor == 0 ? "> Read RW" : "  Read RW");
-  display.setCursor(4, 10); display.println(cursor == 1 ? "> Read RF"   : "  Read RF");
-  display.setCursor(4, 18); display.println(cursor == 2 ? "> Keys"  : "  Keys");
-  display.setCursor(4, 26); display.println(cursor == 3 ? "> Diag" : "  Diag");
+  display.setCursor(4, 2); display.println(cursor == 0 ? "> Read Key" : "  Read Key");
+  display.setCursor(4, 10); display.println(cursor == 1 ? "> Keys"  : "  Keys");
+  display.setCursor(4, 18); display.println(cursor == 2 ? "> Diag" : "  Diag");
   display.display();
 }
 
@@ -653,32 +669,24 @@ void loop() {
 
     case MAIN:
       if (enc.turn()) {
-        cursor = (cursor + enc.dir() + 4) % 4;
+        cursor = (cursor + enc.dir() + 3) % 3;
         drawMain();
       }
       if (enc.click()) {
         if (cursor == 0) { 
-          mode = READ_RW; 
+          mode = READ_KEY; 
           tmStart = millis(); 
           lastTickMs = millis();
           inScanMode = true;
           busy = true;
-          showScanning(F("Scan RW1990"));
+          showScanning(F("Scan Key"));
         }
         if (cursor == 1) { 
-          mode = READ_RF; 
-          tmStart = millis(); 
-          lastTickMs = millis();
-          inScanMode = true;
-          busy = true;
-          showScanning(F("Scan RF"));
-        }
-        if (cursor == 2) { 
           mode = LIST; 
           selKey = 0; 
           drawList(); 
         }
-        if (cursor == 3) {
+        if (cursor == 2) {
           mode = DIAGNOSTICS;
           cursor = 0;
           drawDiagnostics();
@@ -686,7 +694,7 @@ void loop() {
       }
       break;
 
-    case READ_RW: {
+    case READ_KEY: {
 
       if (enc.pressing()) {
         if (scanHoldStartMs == 0) {
@@ -718,7 +726,7 @@ void loop() {
         lastTickMs = millis();
       }
 
-      // Try to read and display RW1990 using unified function
+      // Try to read RW1990 first
       if (rw1990_read_and_display(tempBuf, true)) {
         tempTp = TYPE_RW1990;
         tempUidLen = RW1990_UID_SIZE;
@@ -727,47 +735,12 @@ void loop() {
         mode = READ_RESULT;
         inScanMode = false;
         busy = true;
-      }
-      break;
-    }
-
-    case READ_RF:
-
-      if (enc.pressing()) {
-        if (scanHoldStartMs == 0) {
-          scanHoldStartMs = millis();
-        } else if (millis() - scanHoldStartMs >= 2000UL) {
-          mode = MAIN; 
-          drawMain(); 
-          busy = false; 
-          inScanMode = false;
-          scanHoldStartMs = 0;
-          break;
-        }
-      } else {
-        scanHoldStartMs = 0;
-      }
-      
-
-      if (millis() - tmStart > 15000UL) {
-        mode = MAIN; 
-        drawMain(); 
-        busy = false; 
-        inScanMode = false;
         break;
       }
 
-
-      if (millis() - lastTickMs >= 500) {
-        tickBeep();
-        lastTickMs = millis();
-      }
-
-      // Try to read and display RF card using unified function
+      // If no RW1990, try RF card
       if (rfid_read_and_display(tempBuf, &tempUidLen, true)) {
         tempTp = TYPE_RFID_13M;
-        
-        okBeep();
         
         tmStart = millis();
         mode = READ_RESULT;
@@ -776,24 +749,16 @@ void loop() {
       }
       
       break;
+    }
 
     case READ_RESULT:
       // Display result for 3 seconds, then return to scanning
       if (millis() - tmStart > 3000UL) {
-
-        if (tempTp == TYPE_RW1990) {
-          mode = READ_RW;
-          tmStart = millis();  // Reset scan timeout
-          lastTickMs = millis();
-          inScanMode = true;
-          showScanning(F("Scan RW1990"));
-        } else {
-          mode = READ_RF;
-          tmStart = millis();
-          lastTickMs = millis();
-          inScanMode = true;
-          showScanning(F("Scan RF"));
-        }
+        mode = READ_KEY;
+        tmStart = millis();  // Reset scan timeout
+        lastTickMs = millis();
+        inScanMode = true;
+        showScanning(F("Scan Key"));
         break;
       }
       
@@ -801,23 +766,11 @@ void loop() {
         if (addKey(tempTp, tempBuf, tempUidLen)) okBeep();
         else errBeep();
         
-
-        if (tempTp == TYPE_RW1990) {
-          mode = READ_RW;
-        } else {
-          mode = READ_RF;
-        }
+        mode = READ_KEY;
         tmStart = millis();  // Reset scan timeout
         lastTickMs = millis();
         inScanMode = true;
-        
-
-        display.clearDisplay();
-        if (tempTp == TYPE_RW1990) {
-          showScanning(F("Scan RW1990"));
-        } else {
-          showScanning(F("Scan RF"));
-        }
+        showScanning(F("Scan Key"));
       }
       
       if (enc.hold()) {
