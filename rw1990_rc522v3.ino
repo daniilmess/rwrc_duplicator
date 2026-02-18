@@ -304,7 +304,7 @@ void loadEEPROM() {
   uint8_t firstBootFlag = EEPROM.read(EEPROM_FIRST_BOOT_FLAG);
   
   if (firstBootFlag != 0x01) {
-    Serial.print(F("FirstBoot:1 keys:"));
+    Serial.print(F("BOOT:FIRST CNT:"));
     Serial.println(MASTER_KEYS_COUNT);
     loadMasterKeys();
     saveEEPROM();
@@ -470,7 +470,11 @@ void drawSavedKeyDetail() {
   }
   
   display.setCursor(0, 24);
-  display.print(cursor == 0 ? "   [Write]  Delete" : "    Write  [Delete]");
+  if (cursor == 0) {
+    display.print("   [Write]  Delete");
+  } else {
+    display.print("    Write  [Delete]");
+  }
   display.display();
 }
 
@@ -527,8 +531,8 @@ void formatUID(uint8_t type, const uint8_t* uid, uint8_t uidLen) {
   }
 }
 
-void displayKeyUID(uint8_t type, const uint8_t* uid, uint8_t uidLen, bool showHeader) {
-  if (showHeader) {
+void displayKeyUID(uint8_t type, const uint8_t* uid, uint8_t uidLen, bool clearAndDraw) {
+  if (clearAndDraw) {
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
