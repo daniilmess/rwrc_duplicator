@@ -628,7 +628,7 @@ void loop() {
       break;
 
     case READ_RW: {
-      // Check for 2-second hold to exit
+
       if (enc.pressing()) {
         if (scanHoldStartMs == 0) {
           scanHoldStartMs = millis();
@@ -644,7 +644,7 @@ void loop() {
         scanHoldStartMs = 0;
       }
       
-      // Check for 15-second timeout
+
       if (millis() - tmStart > 15000UL) {
         mode = MAIN; 
         drawMain(); 
@@ -653,7 +653,7 @@ void loop() {
         break;
       }
 
-      // Tick feedback every 500ms
+
       if (millis() - lastTickMs >= 500) {
         tickBeep();
         lastTickMs = millis();
@@ -676,7 +676,7 @@ void loop() {
     }
 
     case READ_RF:
-      // Check for 2-second hold to exit
+
       if (enc.pressing()) {
         if (scanHoldStartMs == 0) {
           scanHoldStartMs = millis();
@@ -692,7 +692,7 @@ void loop() {
         scanHoldStartMs = 0;
       }
       
-      // Check for 15-second timeout
+
       if (millis() - tmStart > 15000UL) {
         mode = MAIN; 
         drawMain(); 
@@ -701,7 +701,7 @@ void loop() {
         break;
       }
 
-      // Tick feedback every 500ms
+
       if (millis() - lastTickMs >= 500) {
         tickBeep();
         lastTickMs = millis();
@@ -728,7 +728,7 @@ void loop() {
     case READ_RESULT:
       // Display result for 3 seconds, then return to scanning
       if (millis() - tmStart > 3000UL) {
-        // Return to appropriate scanning mode
+
         if (tempTp == TYPE_RW1990) {
           mode = READ_RW;
           tmStart = millis();  // Reset scan timeout
@@ -749,7 +749,7 @@ void loop() {
         if (addKey(tempTp, tempBuf, tempUidLen)) okBeep();
         else errBeep();
         
-        // Return to scanning after saving
+
         if (tempTp == TYPE_RW1990) {
           mode = READ_RW;
         } else {
@@ -759,7 +759,7 @@ void loop() {
         lastTickMs = millis();
         inScanMode = true;
         
-        // Display scanning message
+
         display.clearDisplay();
         if (tempTp == TYPE_RW1990) {
           showScanning(F("Scan RW1990"));
@@ -850,8 +850,6 @@ void loop() {
       break;
 
     case WRITE: {
-      // This case implements a waiting loop that repeats via the main loop()
-      // until a device is detected or timeout occurs (7 seconds)
       {
         const char* msg;
         if (tempTp == TYPE_RW1990) msg = "RW1990 blank";
