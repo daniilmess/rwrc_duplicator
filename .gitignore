@@ -1,0 +1,17 @@
+# Temporary files
+/tmp/
+
+# Build artifacts
+*.o
+*.elf
+*.hex
+*.bin
+
+# IDE files
+.vscode/
+.idea/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
