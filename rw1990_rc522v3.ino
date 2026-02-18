@@ -352,12 +352,12 @@ void factoryReset() {
   display.clearDisplay();
   display.setTextSize(2);
   display.setCursor(10, 8);
-  display.println(F("RESETTING"));
+  display.println(F("RESET"));
   display.display();
   
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 3; i++) {
     okBeep();
-    delay(200);
+    delay(150);
   }
   
   asm volatile ("jmp 0");
@@ -378,10 +378,10 @@ void drawMain() {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(4, 2); display.println(cursor == 0 ? "> Read RW1990" : "  Read RW1990");
+  display.setCursor(4, 2); display.println(cursor == 0 ? "> Read RW" : "  Read RW");
   display.setCursor(4, 10); display.println(cursor == 1 ? "> Read RF"   : "  Read RF");
-  display.setCursor(4, 18); display.println(cursor == 2 ? "> Saved Keys"  : "  Saved Keys");
-  display.setCursor(4, 26); display.println(cursor == 3 ? "> Diagnostics" : "  Diagnostics");
+  display.setCursor(4, 18); display.println(cursor == 2 ? "> Keys"  : "  Keys");
+  display.setCursor(4, 26); display.println(cursor == 3 ? "> Diag" : "  Diag");
   display.display();
 }
 
@@ -390,7 +390,7 @@ void drawDiagnostics() {
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
-  display.println(F("DIAGNOSTICS"));
+  display.println(F("DIAG"));
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
   
   int start = max(0, min(cursor, 1));
@@ -400,9 +400,9 @@ void drawDiagnostics() {
     display.setCursor(4, 12 + i * 8);
     display.print(idx == cursor ? "> " : "  ");
     
-    if (idx == 0) display.print(F("RW Check"));
-    else if (idx == 1) display.print(F("RW Read Raw"));
-    else if (idx == 2) display.print(F("RW Erase FF"));
+    if (idx == 0) display.print(F("RW Chk"));
+    else if (idx == 1) display.print(F("RW Raw"));
+    else if (idx == 2) display.print(F("RW Erase"));
     else if (idx == 3) display.print(F("RF Erase"));
   }
   
@@ -410,7 +410,7 @@ void drawDiagnostics() {
 }
 
 void drawList() {
-  drawHeader("Saved Keys");
+  drawHeader("Keys");
   int start = max(0, selKey - 1);
   for (int i = 0; i < 3; i++) {
     int idx = start + i;
@@ -486,7 +486,7 @@ void showApply(const char* s) {
   drawHeader("Apply key");
   display.setCursor(0, 16);
   display.println(s);
-  display.println("7 sec timeout");
+  display.println("7s timeout");
   display.display();
 }
 
@@ -495,7 +495,7 @@ void showScanning(const __FlashStringHelper* msg) {
   display.setTextSize(1);
   display.setCursor(0, 8);
   display.println(msg);
-  display.println(F("Hold 2s to exit"));
+  display.println(F("Hold 2s exit"));
   display.display();
 }
 
@@ -604,7 +604,7 @@ void loop() {
           lastTickMs = millis();
           inScanMode = true;
           busy = true;
-          showScanning(F("Scanning RW1990..."));
+          showScanning(F("Scan RW1990"));
         }
         if (cursor == 1) { 
           mode = READ_RF; 
@@ -612,7 +612,7 @@ void loop() {
           lastTickMs = millis();
           inScanMode = true;
           busy = true;
-          showScanning(F("Scanning RF..."));
+          showScanning(F("Scan RF"));
         }
         if (cursor == 2) { 
           mode = LIST; 
@@ -734,13 +734,13 @@ void loop() {
           tmStart = millis();  // Reset scan timeout
           lastTickMs = millis();
           inScanMode = true;
-          showScanning(F("Scanning RW1990..."));
+          showScanning(F("Scan RW1990"));
         } else {
           mode = READ_RF;
           tmStart = millis();
           lastTickMs = millis();
           inScanMode = true;
-          showScanning(F("Scanning RF..."));
+          showScanning(F("Scan RF"));
         }
         break;
       }
@@ -762,9 +762,9 @@ void loop() {
         // Display scanning message
         display.clearDisplay();
         if (tempTp == TYPE_RW1990) {
-          showScanning(F("Scanning RW1990..."));
+          showScanning(F("Scan RW1990"));
         } else {
-          showScanning(F("Scanning RF..."));
+          showScanning(F("Scan RF"));
         }
       }
       
@@ -911,17 +911,17 @@ void loop() {
       display.setCursor(0, 8);
       if (res) {
         okBeep();
-        if (tempTp == TYPE_RW1990) display.println("RW1990 Written OK");
-        else if (tempTp == TYPE_RFID_13M) display.println("RF13 Written OK");
-        else if (tempTp == TYPE_RFID_125K) display.println("RF125 Written OK");
-        display.println("Check: PASS");
+        if (tempTp == TYPE_RW1990) display.println("RW OK");
+        else if (tempTp == TYPE_RFID_13M) display.println("RF13 OK");
+        else if (tempTp == TYPE_RFID_125K) display.println("RF125 OK");
+        display.println("CHK:PASS");
       } else {
         errBeep();
-        display.println("Write failed!");
-        display.println("Check: FAIL");
+        display.println("WR:FAIL");
+        display.println("CHK:FAIL");
       }
       display.display();
-      delay(2200);
+      delay(1800);
 
       mode = LIST; drawList(); busy = false;
       break;
@@ -963,10 +963,10 @@ void loop() {
       display.clearDisplay();
       display.setTextSize(1);
       display.setCursor(0, 0);
-      display.println(F("RW Check"));
+      display.println(F("RW Chk"));
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
       display.setCursor(0, 14);
-      display.println(F("Checking..."));
+      display.println(F("Check..."));
       display.display();
       
       delay(300);
@@ -976,15 +976,15 @@ void loop() {
       display.clearDisplay();
       display.setTextSize(1);
       display.setCursor(0, 0);
-      display.println(F("RW Check"));
+      display.println(F("RW Chk"));
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
       display.setCursor(0, 16);
       
       if (present) {
-        display.println(F("RW Found!"));
+        display.println(F("Found!"));
         okBeep();
       } else {
-        display.println(F("No RW Key"));
+        display.println(F("No Key"));
         errBeep();
       }
       
@@ -1002,10 +1002,10 @@ void loop() {
       display.clearDisplay();
       display.setTextSize(1);
       display.setCursor(0, 0);
-      display.println(F("RW Read Raw"));
+      display.println(F("RW Raw"));
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
       display.setCursor(0, 14);
-      display.println(F("Reading..."));
+      display.println(F("Read..."));
       display.display();
       
       delay(300);
@@ -1016,12 +1016,12 @@ void loop() {
       display.clearDisplay();
       display.setTextSize(1);
       display.setCursor(0, 0);
-      display.println(F("RW Read Raw"));
+      display.println(F("RW Raw"));
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
       
       if (found) {
         display.setCursor(0, 12);
-        display.println(F("(no CRC check)"));
+        display.println(F("(no CRC)"));
         display.setCursor(0, 22);
         for (uint8_t i = 0; i < 8; i++) {
           if (rawBuf[i] < 16) display.print('0');
@@ -1031,12 +1031,12 @@ void loop() {
         okBeep();
       } else {
         display.setCursor(0, 16);
-        display.println(F("No RW Key"));
+        display.println(F("No Key"));
         errBeep();
       }
       
       display.display();
-      delay(3000);
+      delay(2000);
       
       mode = DIAGNOSTICS;
       cursor = 1;
@@ -1049,10 +1049,10 @@ void loop() {
       display.clearDisplay();
       display.setTextSize(1);
       display.setCursor(0, 0);
-      display.println(F("RW Erase FF"));
+      display.println(F("RW Erase"));
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
       display.setCursor(0, 14);
-      display.println(F("Place RW key..."));
+      display.println(F("Place key..."));
       display.display();
       
       unsigned long startWait = millis();
@@ -1069,10 +1069,10 @@ void loop() {
         display.clearDisplay();
         display.setTextSize(1);
         display.setCursor(0, 0);
-        display.println(F("RW Erase FF"));
+        display.println(F("RW Erase"));
         display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
         display.setCursor(0, 16);
-        display.println(F("Timeout!"));
+        display.println(F("Timeout"));
         display.display();
         errBeep();
         delay(2000);
@@ -1086,10 +1086,10 @@ void loop() {
       display.clearDisplay();
       display.setTextSize(1);
       display.setCursor(0, 0);
-      display.println(F("RW Erase FF"));
+      display.println(F("RW Erase"));
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
       display.setCursor(0, 14);
-      display.println(F("Writing FF..."));
+      display.println(F("Write FF..."));
       display.display();
       
       delay(500);
@@ -1099,15 +1099,15 @@ void loop() {
       display.clearDisplay();
       display.setTextSize(1);
       display.setCursor(0, 0);
-      display.println(F("RW Erase FF"));
+      display.println(F("RW Erase"));
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
       display.setCursor(0, 16);
       
       if (success) {
-        display.println(F("Erased OK!"));
+        display.println(F("OK!"));
         okBeep();
       } else {
-        display.println(F("Erase failed!"));
+        display.println(F("Failed"));
         errBeep();
       }
       
@@ -1128,7 +1128,7 @@ void loop() {
       display.println(F("RF Erase"));
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
       display.setCursor(0, 14);
-      display.println(F("Place RF card..."));
+      display.println(F("Place card..."));
       display.display();
       
       unsigned long startWait = millis();
@@ -1148,7 +1148,7 @@ void loop() {
         display.println(F("RF Erase"));
         display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
         display.setCursor(0, 16);
-        display.println(F("Timeout!"));
+        display.println(F("Timeout"));
         display.display();
         errBeep();
         delay(2000);
@@ -1165,7 +1165,7 @@ void loop() {
       display.println(F("RF Erase"));
       display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
       display.setCursor(0, 14);
-      display.println(F("Erasing..."));
+      display.println(F("Erase..."));
       display.display();
       
       delay(500);
@@ -1204,10 +1204,10 @@ void loop() {
       display.setCursor(0, 16);
       
       if (success) {
-        display.println(F("Erased OK!"));
+        display.println(F("OK!"));
         okBeep();
       } else {
-        display.println(F("(Protected?)"));
+        display.println(F("Protect?"));
         errBeep();
       }
       
