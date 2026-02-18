@@ -291,7 +291,6 @@ void tickBeep() {
 
 
 uint8_t detectRF() {
-  // Try 13.56MHz first (MFRC522)
   if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
     return TYPE_RFID_13M;
   }
@@ -419,11 +418,10 @@ void drawDiagnostics() {
   display.println(F("DIAGNOSTICS"));
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
   
-  // Show up to 3 items at a time with scrolling
-  int start = max(0, min(cursor, 1)); // Start position for scrolling (max 1 since we have 4 items)
+  int start = max(0, min(cursor, 1));
   for (int i = 0; i < 3; i++) {
     int idx = start + i;
-    if (idx >= 4) break; // We have 4 diagnostic options
+    if (idx >= 4) break;
     display.setCursor(4, 12 + i * 8);
     display.print(idx == cursor ? "> " : "  ");
     
@@ -587,7 +585,6 @@ void setup() {
 
   delay(500);
 
-  // Initialize display first
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
     Serial.println(F("SSD1306 init failed! Try 0x3D"));
     while (1);
@@ -597,14 +594,11 @@ void setup() {
   display.display();
   delay(100);
 
-  // Show logo
   drawLogo();
 
-  // Initialize other peripherals
   SPI.begin();
   rfid.PCD_Init();
 
-  // Play startup sound after logo display
   playMusic();
 
   delay(1500);
@@ -618,7 +612,6 @@ void setup() {
 void loop() {
   enc.tick();
 
-  // Factory reset: hold encoder 15+ seconds from any mode
   if (enc.pressing()) {
     if (holdStartMs == 0) {
       holdStartMs = millis();
@@ -628,9 +621,6 @@ void loop() {
   } else {
     holdStartMs = 0;
   }
-
-  // Remove yellow LED blink on encoder click (as per requirements)
-  // We only use LED feedback during scanning and other specific states
 
   if (busy && !inScanMode) {
     digitalWrite(LED_Y, (millis() >> 9) & 1);
@@ -712,10 +702,7 @@ void loop() {
         tempTp = TYPE_RW1990;
         tempUidLen = 8;
         
-        // Success feedback
-        digitalWrite(LED_G, HIGH);
         okBeep();
-        digitalWrite(LED_G, LOW);
         
         printUID(tempBuf, tempUidLen);
         tmStart = millis();
@@ -760,15 +747,12 @@ void loop() {
 
       // Try to detect RF card
       if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
-        tempTp = TYPE_RFID_13M;  // Detected 13.56MHz
+        tempTp = TYPE_RFID_13M;
         tempUidLen = min(rfid.uid.size, (uint8_t)8);
         memcpy(tempBuf, rfid.uid.uidByte, tempUidLen);
         rfid.PICC_HaltA();
         
-        // Success feedback
-        digitalWrite(LED_G, HIGH);
         okBeep();
-        digitalWrite(LED_G, LOW);
         
         printUID(tempBuf, tempUidLen);
         tmStart = millis();
@@ -776,8 +760,6 @@ void loop() {
         inScanMode = false;
         busy = true;
       }
-      
-      // TODO: Add 125kHz detection if hardware available
       
       break;
 
