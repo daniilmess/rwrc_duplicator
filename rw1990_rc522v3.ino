@@ -833,7 +833,7 @@ void loop() {
       }
       break;
 
-    case READ_RW:
+    case READ_RW: {
       // Check for 2-second hold to exit
       if (enc.pressing()) {
         if (scanHoldStartMs == 0) {
@@ -882,6 +882,7 @@ void loop() {
         busy = true;
       }
       break;
+    }
 
     case READ_RF:
       // Check for 2-second hold to exit
@@ -1170,7 +1171,7 @@ void loop() {
       mode = LIST; drawList(); busy = false;
       break;
 
-    case DIAGNOSTICS:
+    case DIAGNOSTICS: {
       if (enc.turn()) {
         cursor = (cursor + enc.dir() + 4) % 4;
         drawDiagnostics();
@@ -1200,6 +1201,7 @@ void loop() {
         drawMain();
       }
       break;
+    }
 
     case DIAG_RW_CHECK:
       {
