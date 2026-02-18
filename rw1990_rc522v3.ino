@@ -952,29 +952,23 @@ void loop() {
         res = rw1990_write(tempBuf);
         
         // After write, read and display the result
-        display.clearDisplay();
-        display.setTextSize(1);
-        display.setCursor(0, 8);
-        
         uint8_t readBuf[8];
-        if (rw1990_read_and_display(readBuf, false)) {
+        if (rw1990_read_and_display(readBuf, true)) {
           // Check if write was successful
           if (memcmp(readBuf, tempBuf, 8) == 0) {
             okBeep();
-            display.setCursor(0, 8);
-            display.println("RW OK");
           } else {
             errBeep();
-            display.setCursor(0, 8);
-            display.println("WR:FAIL");
           }
         } else {
           errBeep();
+          display.clearDisplay();
+          display.setTextSize(1);
           display.setCursor(0, 8);
           display.println("WR:FAIL");
           display.println("CHK:FAIL");
+          display.display();
         }
-        display.display();
       } else {
         if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
           res = (memcmp(rfid.uid.uidByte, tempBuf, min(rfid.uid.size, (size_t)8)) == 0);
