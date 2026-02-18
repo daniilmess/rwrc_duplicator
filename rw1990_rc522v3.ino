@@ -39,17 +39,16 @@ enum KeyType {
 };
 
 struct KeyRec {
-  uint8_t  type;      // 0 = RW1990, 1 = RFID 13.56MHz, 2 = RFID 125kHz
+  uint8_t  type;
   uint8_t  uid[8];
-  uint8_t  uidLen;    // Actual UID length (4-8 bytes)
-  char     name[16];  // Key name
-  bool     isMaster;  // True if this is a master key from PROGMEM
+  uint8_t  uidLen;
+  char     name[16];
+  bool     isMaster;
 };
 
 KeyRec keys[MAX_KEYS];
 uint8_t keyCnt = 0;
 
-// Master keys stored in PROGMEM
 const KeyRec PROGMEM masterKeys[] = {
   {TYPE_RW1990, {0x01, 0xCA, 0xC9, 0xAF, 0x02, 0x00, 0x00, 0xC0}, 8, "home_78", true},
   {TYPE_RFID_13M, {0x04, 0xA1, 0xB2, 0xC3, 0x00, 0x00, 0x00, 0x00}, 4, "office_card", true},
@@ -92,8 +91,8 @@ bool inScanMode = false;
 
 
 bool rw1990_read(uint8_t* buf) {
-  ow.reset_search();  // Reset search state to ensure fresh device detection
-  noInterrupts();  // пауза прерываний
+  ow.reset_search();
+  noInterrupts();
   bool res = false;
   if (ow.search(buf)) {
     byte crc = ow.crc8(buf, 7);
@@ -101,7 +100,7 @@ bool rw1990_read(uint8_t* buf) {
   } else {
     ow.reset_search();
   }
-  interrupts();  // возврат прерываний
+  interrupts();
   if (res) {
     Serial.print(F("RW1990 read OK: "));
     for (uint8_t i = 0; i < 8; i++) {
@@ -192,17 +191,14 @@ bool rw1990_write(const uint8_t* newID) {
 
 void rw1990_write_byte(uint8_t data) {
   for (uint8_t bit = 0; bit < 8; bit++) {
-    // Critical section: only during pulse generation (microseconds)
     noInterrupts();
     if (data & 1) {
-      // Write '1': 60µs pulse
       digitalWrite(OW_PIN, LOW);
       pinMode(OW_PIN, OUTPUT);
       delayMicroseconds(60);
       pinMode(OW_PIN, INPUT);
       digitalWrite(OW_PIN, HIGH);
     } else {
-      // Write '0': 5µs pulse
       digitalWrite(OW_PIN, LOW);
       pinMode(OW_PIN, OUTPUT);
       delayMicroseconds(5);
@@ -210,7 +206,6 @@ void rw1990_write_byte(uint8_t data) {
       digitalWrite(OW_PIN, HIGH);
     }
     interrupts();
-    // 15ms delay allows interrupts - adequate for iButton protocol
     delay(15);
     data >>= 1;
   }
@@ -248,7 +243,7 @@ bool rw1990_erase_ff() {
 
 
 void playMusic() {
-  int Ab4 = 415; // ~G#4
+  int Ab4 = 415;
   int C5  = 523;
   int Eb5 = 622;
   int E5  = 659;
@@ -257,7 +252,7 @@ void playMusic() {
   tone(BUZZ, C5,  120); delay(160);
   tone(BUZZ, Eb5, 120); delay(160);
   tone(BUZZ, E5,  120); delay(160);
-  tone(BUZZ, Eb5, 450); delay(180); // длинный Eb5
+  tone(BUZZ, Eb5, 450); delay(180);
   tone(BUZZ, C5,  160); delay(160);
   tone(BUZZ, Ab4, 280); delay(400);
 
@@ -947,52 +942,41 @@ void loop() {
         showApply(msg);
       }
 
-      // Waiting loop for key/card to be applied
       {
         unsigned long now = millis();
         unsigned long elapsed = now - tmStart;
         
-        // Check for timeout
         if (elapsed > 7000UL) {
-          digitalWrite(LED_Y, LOW);  // Ensure LED is off on timeout
+          digitalWrite(LED_Y, LOW);
           mode = LIST; drawList(); busy = false; break;
         }
         
-        // Blink yellow LED (toggle every 250ms for visible blinking)
         if ((elapsed % 500) < 250) {
           digitalWrite(LED_Y, HIGH);
         } else {
           digitalWrite(LED_Y, LOW);
         }
         
-        // Beep once per second
         if (now - lastBeepMs >= 1000) {
           toneBeep(1000, 50);
           lastBeepMs = now;
         }
         
-        // Check for key/card presence
         bool devicePresent = false;
         if (tempTp == TYPE_RW1990) {
-          // RW1990: check if device is present
           uint8_t presenceCheckBuf[8];
           devicePresent = rw1990_read(presenceCheckBuf);
         } else {
-          // RFID: check if card is present
           devicePresent = rfid.PICC_IsNewCardPresent();
         }
         
-        // If no device detected yet, stay in waiting loop by breaking here
-        // The main loop() will re-enter this WRITE case on the next iteration
         if (!devicePresent) {
           break;
         }
         
-        // Device detected! Turn off LED and proceed with write
         digitalWrite(LED_Y, LOW);
       }
       
-      // Perform write operation
       bool res = false;
 
       if (tempTp == TYPE_RW1990) {
@@ -1120,7 +1104,6 @@ void loop() {
         display.setCursor(0, 12);
         display.println(F("(no CRC check)"));
         display.setCursor(0, 22);
-        // Display all 8 bytes
         for (uint8_t i = 0; i < 8; i++) {
           if (rawBuf[i] < 16) display.print('0');
           display.print(rawBuf[i], HEX);
@@ -1153,7 +1136,6 @@ void loop() {
       display.println(F("Place RW key..."));
       display.display();
       
-      // Wait for key presence (up to 5 seconds)
       unsigned long startWait = millis();
       bool keyPresent = false;
       while (millis() - startWait < 5000UL) {
@@ -1230,7 +1212,6 @@ void loop() {
       display.println(F("Place RF card..."));
       display.display();
       
-      // Wait for card presence (up to 5 seconds)
       unsigned long startWait = millis();
       bool cardPresent = false;
       while (millis() - startWait < 5000UL) {
@@ -1270,28 +1251,22 @@ void loop() {
       
       delay(500);
       
-      // Try to erase user sectors (sectors 1-15, skipping sector 0)
-      // This is for Mifare Classic 1K cards
       bool success = true;
       MFRC522::StatusCode status;
       byte zeros[16] = {0};
       
-      // Default key for blank Chinese cards
       MFRC522::MIFARE_Key key;
       for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
       
-      // Try to write zeros to a few test sectors
       for (byte sector = 1; sector < 4 && success; sector++) {
         byte blockAddr = sector * 4;
         
-        // Authenticate
         status = rfid.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, &key, &(rfid.uid));
         if (status != MFRC522::STATUS_OK) {
           success = false;
           break;
         }
         
-        // Write zeros to first block of sector
         status = rfid.MIFARE_Write(blockAddr, zeros, 16);
         if (status != MFRC522::STATUS_OK) {
           success = false;
