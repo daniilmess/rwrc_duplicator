@@ -275,14 +275,6 @@ void tickBeep() {
 }
 
 
-uint8_t detectRF() {
-  if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
-    return TYPE_RFID_13M;
-  }
-  
-  return 255;
-}
-
 void loadMasterKeys() {
   Serial.println(F("MKEYS:LOAD"));
   keyCnt = 0;
@@ -417,6 +409,13 @@ void drawDiagnostics() {
   display.display();
 }
 
+void returnToDiagnostics(uint8_t cursorPos) {
+  mode = DIAGNOSTICS;
+  cursor = cursorPos;
+  drawDiagnostics();
+  busy = false;
+}
+
 void drawList() {
   drawHeader("Keys");
   int start = max(0, selKey - 1);
@@ -494,14 +493,6 @@ void drawConfirmDelete() {
   display.display();
 }
 
-void showApply(const char* s) {
-  drawHeader("Apply key");
-  display.setCursor(0, 16);
-  display.println(s);
-  display.println("7s timeout");
-  display.display();
-}
-
 void showScanning(const __FlashStringHelper* msg) {
   display.clearDisplay();
   display.setTextSize(1);
@@ -517,11 +508,11 @@ void printHex(uint8_t b) {
   display.print(b, HEX);
 }
 
-const char* getKeyTypeStr(uint8_t type) {
-  if (type == TYPE_RW1990) return "RW1990 ID";
-  if (type == TYPE_RFID_13M) return "RF 13.56 MHz";
-  if (type == TYPE_RFID_125K) return "RF 125 kHz";
-  return "Key ID";
+const __FlashStringHelper* getKeyTypeStr(uint8_t type) {
+  if (type == TYPE_RW1990) return F("RW1990 ID");
+  if (type == TYPE_RFID_13M) return F("RF 13.56 MHz");
+  if (type == TYPE_RFID_125K) return F("RF 125 kHz");
+  return F("Key ID");
 }
 
 void formatUID(uint8_t type, const uint8_t* uid, uint8_t uidLen) {
@@ -868,7 +859,11 @@ void loop() {
         else if (tempTp == TYPE_RFID_13M) msg = "RF13 magic card";
         else if (tempTp == TYPE_RFID_125K) msg = "RF125 magic card";
         else msg = "Device";
-        showApply(msg);
+        drawHeader("Apply key");
+        display.setCursor(0, 16);
+        display.println(msg);
+        display.println("7s timeout");
+        display.display();
       }
 
       {
@@ -993,10 +988,7 @@ void loop() {
       display.display();
       delay(2000);
       
-      mode = DIAGNOSTICS;
-      cursor = 0;
-      drawDiagnostics();
-      busy = false;
+      returnToDiagnostics(0);
       break;
     }
 
@@ -1032,10 +1024,7 @@ void loop() {
       display.display();
       delay(2000);
       
-      mode = DIAGNOSTICS;
-      cursor = 1;
-      drawDiagnostics();
-      busy = false;
+      returnToDiagnostics(1);
       break;
     }
 
@@ -1062,10 +1051,7 @@ void loop() {
         display.display();
         errBeep();
         delay(2000);
-        mode = DIAGNOSTICS;
-        cursor = 2;
-        drawDiagnostics();
-        busy = false;
+        returnToDiagnostics(2);
         break;
       }
       
@@ -1092,10 +1078,7 @@ void loop() {
       display.display();
       delay(2000);
       
-      mode = DIAGNOSTICS;
-      cursor = 2;
-      drawDiagnostics();
-      busy = false;
+      returnToDiagnostics(2);
       break;
     }
 
@@ -1122,10 +1105,7 @@ void loop() {
         display.display();
         errBeep();
         delay(2000);
-        mode = DIAGNOSTICS;
-        cursor = 3;
-        drawDiagnostics();
-        busy = false;
+        returnToDiagnostics(3);
         break;
       }
       
@@ -1176,10 +1156,7 @@ void loop() {
       display.display();
       delay(2000);
       
-      mode = DIAGNOSTICS;
-      cursor = 3;
-      drawDiagnostics();
-      busy = false;
+      returnToDiagnostics(3);
       break;
     }
   }
