@@ -526,7 +526,7 @@ void showApply(const char* s) {
   display.display();
 }
 
-void showScanning(const char* msg) {
+void showScanning(const __FlashStringHelper* msg) {
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 8);
