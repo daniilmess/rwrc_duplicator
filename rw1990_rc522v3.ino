@@ -961,14 +961,20 @@ void loop() {
         // After write, read and display the result
         uint8_t readBuf[RW1990_UID_SIZE];
         if (rw1990_read_and_display(readBuf, true)) {
-          // Check if write was successful - display additional message if mismatch
+          // rw1990_read_and_display() has already shown the result and played appropriate beep
+          // Just check if data matches what we wrote
           if (memcmp(readBuf, tempBuf, RW1990_UID_SIZE) != 0) {
-            delay(500);
-            display.setCursor(0, 0);
-            display.print(F("WR:FAIL"));
+            // Data mismatch - write failed, show error overlay
+            delay(1000);
+            display.clearDisplay();
+            display.setTextSize(1);
+            display.setCursor(0, 8);
+            display.println(F("WR:FAIL"));
+            display.println(F("Data mismatch"));
             display.display();
           }
         } else {
+          // No device found after write
           errBeep();
           display.clearDisplay();
           display.setTextSize(1);
