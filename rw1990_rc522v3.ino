@@ -170,7 +170,7 @@ bool rw1990_read_and_display(uint8_t* buf, bool clearAndDraw) {
   
   // Display error status on next line
   display.setCursor(0, 24);
-  display.print(F(" |"));
+  display.print(F("| "));
   const char* errorStatus = rw1990_check_errors(buf);
   display.print(errorStatus);
   
@@ -1066,3 +1066,4 @@ void loop() {
     }
   }
 }
+
