@@ -899,10 +899,18 @@ void loop() {
         
         bool devicePresent = false;
         if (tempTp == TYPE_RW1990) {
-          // Check for device presence using dummy buffer (allow broken keys too)
-          uint8_t dummyBuf[RW1990_UID_SIZE];
+          // First read for contact stability check
           ow.reset_search();
-          devicePresent = ow.search(dummyBuf);
+          devicePresent = ow.search(tempBuf);
+          if (devicePresent) {
+            delay(50);
+            // Second read to verify stable contact
+            ow.reset_search();
+            if (!ow.search(oldID) || memcmp(tempBuf, oldID, RW1990_UID_SIZE) != 0) {
+              // Unstable contact - break and retry
+              break;
+            }
+          }
         } else {
           devicePresent = rfid.PICC_IsNewCardPresent();
         }
