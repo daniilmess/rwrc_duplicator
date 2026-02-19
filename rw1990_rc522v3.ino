@@ -285,7 +285,7 @@ bool rw1990_write(const uint8_t* newID) {
   noInterrupts();
   digitalWrite(OW_PIN, LOW);
   pinMode(OW_PIN, OUTPUT);
-  delayMicroseconds(60);
+  delayMicroseconds(10);
   pinMode(OW_PIN, INPUT);
   digitalWrite(OW_PIN, HIGH);
   interrupts();
@@ -308,22 +308,22 @@ bool rw1990_write(const uint8_t* newID) {
 
 void rw1990_write_byte(uint8_t data) {
   for (uint8_t bit = 0; bit < 8; bit++) {
-    noInterrupts();
     if (data & 1) {
+      // Bit 1 → 60 microsecond pulse
       digitalWrite(OW_PIN, LOW);
       pinMode(OW_PIN, OUTPUT);
       delayMicroseconds(60);
       pinMode(OW_PIN, INPUT);
       digitalWrite(OW_PIN, HIGH);
     } else {
+      // Bit 0 → 1 microsecond pulse (very short!)
       digitalWrite(OW_PIN, LOW);
       pinMode(OW_PIN, OUTPUT);
-      delayMicroseconds(5);
+      delayMicroseconds(1);
       pinMode(OW_PIN, INPUT);
       digitalWrite(OW_PIN, HIGH);
     }
-    interrupts();
-    delay(15);
+    delay(10);  // Interval between bits
     data >>= 1;
   }
 }
@@ -550,7 +550,7 @@ void drawSavedKeyDetail() {
   
   display.setCursor(0, 24);
   if (cursor == 0) {
-    display.print("   [Write]  Delete");
+    display.print("   > Write  Delete");
   } else {
     display.print("    Write  [Delete]");
   }
@@ -856,15 +856,15 @@ void loop() {
 
     case WRITE: {
       {
-        const char* msg;
-        if (tempTp == TYPE_RW1990) msg = "RW1990 blank";
-        else if (tempTp == TYPE_RFID_13M) msg = "RF13 magic card";
-        else if (tempTp == TYPE_RFID_125K) msg = "RF125 magic card";
-        else msg = "Device";
-        drawHeader("Apply key");
-        display.setCursor(0, 16);
-        display.println(msg);
-        display.println("7s timeout");
+        char hdr[21];  // "Writing RW/RF: " (12) + up to 8 char name + null
+        if (tempTp == TYPE_RW1990) strcpy(hdr, "Writing RW: ");
+        else strcpy(hdr, "Writing RF: ");
+        if (keys[selKey].name[0] != '\0') strncat(hdr, keys[selKey].name, sizeof(hdr) - strlen(hdr) - 1);
+        drawHeader(hdr);
+        display.setCursor(0, 14);
+        formatUID(tempTp, tempBuf, tempUidLen);
+        display.setCursor(0, 24);
+        display.print(F("Place key..."));
         display.display();
       }
 
@@ -907,6 +907,12 @@ void loop() {
       }
       
       bool res = false;
+
+      // Show writing progress on line 24
+      display.fillRect(0, 24, 128, 8, SSD1306_BLACK);
+      display.setCursor(0, 24);
+      display.print(F("Writing: * * * * * * * *"));
+      display.display();
 
       if (tempTp == TYPE_RW1990) {
         res = rw1990_write(tempBuf);
