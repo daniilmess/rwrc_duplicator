@@ -193,25 +193,6 @@ uint8_t detectRFIDChip() {
   }
 }
 
-void drawReadHeader(uint8_t keyType, uint8_t chipType) {
-  char hdr[22];
-  if (keyType == TYPE_RW) {
-    snprintf(hdr, sizeof(hdr), "RW: %s", owChipName(chipType));
-  } else {
-    snprintf(hdr, sizeof(hdr), "RF 13.56: %s", rfidChipName(chipType));
-  }
-  drawHeader(hdr);
-}
-
-void drawWriteHeader(uint8_t keyType, uint8_t chipType) {
-  char hdr[22];
-  if (keyType == TYPE_RW) {
-    snprintf(hdr, sizeof(hdr), "WR: %s", owChipName(chipType));
-  } else {
-    snprintf(hdr, sizeof(hdr), "WR RF: %s", rfidChipName(chipType));
-  }
-  drawHeader(hdr);
-}
 
 // Helper function to check Family/CRC errors and return error message
 // Validates RW1990 family byte (buf[0]) and CRC checksum (buf[7])
@@ -282,7 +263,9 @@ bool rw1990_read_and_display(uint8_t* buf, bool clearAndDraw, uint8_t* chipOut =
   uint8_t chip = OW_UNKNOWN;
   if (clearAndDraw) {
     chip = detectOneWireChip(buf);
-    drawReadHeader(TYPE_RW, chip);
+    char hdr[22];
+    snprintf(hdr, sizeof(hdr), "RW: %s", owChipName(chip));
+    drawHeader(hdr);
   }
   if (chipOut) *chipOut = chip;
   
@@ -327,7 +310,9 @@ bool rfid_read_and_display(uint8_t* buf, uint8_t* uidLen, bool clearAndDraw, uin
   uint8_t chip = RFID_UNKNOWN;
   if (clearAndDraw) {
     chip = detectRFIDChip();
-    drawReadHeader(TYPE_13, chip);
+    char hdr[22];
+    snprintf(hdr, sizeof(hdr), "RF 13.56: %s", rfidChipName(chip));
+    drawHeader(hdr);
   }
   if (chipOut) *chipOut = chip;
 
@@ -362,27 +347,15 @@ bool rw1990_write(const uint8_t* id) {
   ow.write(0x33);
   
   // Read and store old ID into global oldID buffer
-  Serial.print(F("ID: "));
   for (uint8_t i = 0; i < RW1990_UID_SIZE; i++) {
     oldID[i] = ow.read();
-    Serial.print(oldID[i] < 16 ? "0" : "");
-    Serial.print(oldID[i], HEX);
-    Serial.print(' ');
   }
-  Serial.println();
 
-  // Debug: show newID and tempBuf
+  // Debug: show newID
   Serial.print(F("newID:"));
   for (uint8_t i = 0; i < RW1990_UID_SIZE; i++) {
     Serial.print(newID[i] < 16 ? "0" : "");
     Serial.print(newID[i], HEX);
-    Serial.print(' ');
-  }
-  Serial.println();
-  Serial.print(F("tempBuf:"));
-  for (uint8_t i = 0; i < RW1990_UID_SIZE; i++) {
-    Serial.print(tempBuf[i] < 16 ? "0" : "");
-    Serial.print(tempBuf[i], HEX);
     Serial.print(' ');
   }
   Serial.println();
@@ -988,7 +961,13 @@ void loop() {
     case WRITE: {
       {
         uint8_t chipType = (tempTp == TYPE_RW) ? keys[selKey].owChip : keys[selKey].rfidChip;
-        drawWriteHeader(tempTp, chipType);
+        char hdr[22];
+        if (tempTp == TYPE_RW) {
+          snprintf(hdr, sizeof(hdr), "WR: %s", owChipName(chipType));
+        } else {
+          snprintf(hdr, sizeof(hdr), "WR RF: %s", rfidChipName(chipType));
+        }
+        drawHeader(hdr);
         display.setCursor(0, 14);
         formatUID(tempTp, newID, tempUidLen);
         display.setCursor(0, 24);
