@@ -270,11 +270,11 @@ bool rw1990_write(const uint8_t* id) {
     oldID[i] = ow.read();
   }
 
-  // Debug: show newID
+  // Debug: show id to be written
   Serial.print(F("newID:"));
   for (uint8_t i = 0; i < RW1990_UID_SIZE; i++) {
-    Serial.print(newID[i] < 16 ? "0" : "");
-    Serial.print(newID[i], HEX);
+    Serial.print(id[i] < 16 ? "0" : "");
+    Serial.print(id[i], HEX);
     Serial.print(' ');
   }
   Serial.println();
@@ -352,6 +352,13 @@ void rw1990_write_byte(uint8_t data) {
 void toneBeep(int hz, int ms) {
   tone(BUZZ, hz, ms);
   delay(ms + 10);
+}
+
+void fatalBlinkYellow() {
+  while (1) {
+    digitalWrite(LED_Y, HIGH); delay(200);
+    digitalWrite(LED_Y, LOW);  delay(200);
+  }
 }
 
 void okBeep() {
@@ -468,6 +475,11 @@ void drawKeyInfo(const char* txt) {
   display.setCursor(0, 0);
   display.println(txt);
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+}
+
+void drawKeyInfoAndShow(const char* txt) {
+  drawKeyInfo(txt);
+  display.display();
 }
 
 void drawKeyInfoDual(const char* prefix, const char* suffix) {
@@ -624,13 +636,26 @@ void setup() {
   Serial.begin(115200);
   Serial.println(F("START"));
 
+  Wire.begin();
+  Wire.beginTransmission(OLED_ADDR);
+  if (Wire.endTransmission() != 0) {
+    Serial.println(F("OLED:I2C:NO_3C"));
+    fatalBlinkYellow();
+  }
+
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-    Serial.println(F("OLED:ERR"));
-    while (1);
+    Serial.println(F("OLED:BEGIN:FAIL"));
+    fatalBlinkYellow();
   }
 
   display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 8);
+  display.println(F("OLED OK"));
+  display.println(F("rwrc_duplicator"));
   display.display();
+  delay(300);
 
   SPI.begin();
   rfid.PCD_Init();
