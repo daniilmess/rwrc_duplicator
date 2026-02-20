@@ -359,6 +359,65 @@ void rw1990_write_byte(uint8_t data) {
   }
 }
 
+// Write UID to a MIFARE UID-writable ("magic") card block 0.
+// Card must already be selected (PICC_ReadCardSerial called).
+// Builds block 0: [UID(4)][BCC][SAK=0x08][ATQA0=0x04][ATQA1=0x00][manuf x8]
+// Returns true on success; logs failure reason to Serial.
+bool rfid_write_uid(const uint8_t* uid, uint8_t uidLen) {
+  MFRC522::MIFARE_Key key;
+  for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
+
+  // Authenticate sector 0 (blockAddr=0 is any block in sector 0, which is valid).
+  MFRC522::StatusCode status = rfid.PCD_Authenticate(
+      MFRC522::PICC_CMD_MF_AUTH_KEY_A, 0, &key, &rfid.uid);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("RF:AUTH0:FAIL "));
+    Serial.println((int)status);
+    rfid.PCD_StopCrypto1();
+    return false;
+  }
+
+  byte block0[16] = {0};
+  uint8_t n = min(uidLen, (uint8_t)4);
+  for (uint8_t i = 0; i < n; i++) block0[i] = uid[i];
+  block0[4] = block0[0] ^ block0[1] ^ block0[2] ^ block0[3];  // BCC
+  block0[5] = 0x08;  // SAK (MIFARE 1K)
+  block0[6] = 0x04;  // ATQA[0]
+  block0[7] = 0x00;  // ATQA[1]
+
+  status = rfid.MIFARE_Write(0, block0, 16);
+  rfid.PCD_StopCrypto1();
+
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("RF:WR0:FAIL "));
+    Serial.println((int)status);
+    return false;
+  }
+  Serial.println(F("RF:WR0:OK"));
+  return true;
+}
+
+// Display write result status and play appropriate beep.
+// Clears display and shows type-specific OK/FAIL message.
+void showWriteStatus(uint8_t type, bool success) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 8);
+  if (success) {
+    okBeep();
+    if (type == TYPE_RW)       display.println(F("RW:OK"));
+    else if (type == TYPE_13)  display.println(F("RF13:OK"));
+    else                       display.println(F("RF125:OK"));
+    display.println(F("WR:PASS"));
+  } else {
+    errBeep();
+    display.println(F("WR:FAIL"));
+    if (type == TYPE_13 || type == TYPE_125) display.println(F("Use magic card"));
+    else                                     display.println(F("CHK:FAIL"));
+  }
+  display.display();
+}
+
 void toneBeep(int hz, int ms) {
   tone(BUZZ, hz, ms);
   delay(ms + 10);
@@ -1009,7 +1068,7 @@ void loop() {
       if (tempTp == TYPE_RW) {
         res = rw1990_write(newID);
         
-        // After write, read and display the result
+        // After write, read back and display the result
         uint8_t readBuf[RW1990_UID_SIZE];
         if (rw1990_read(readBuf)) {
           uint8_t rchip = detectOneWireChip(readBuf);
@@ -1022,44 +1081,21 @@ void loop() {
           display.display();
           if (rw1990_is_ok(readBuf)) okBeep(); else errBeep();
           if (memcmp(readBuf, newID, RW1990_UID_SIZE) != 0) {
-            // Data mismatch - write failed, show error overlay
             delay(1000);
-            display.clearDisplay();
-            display.setTextSize(1);
-            display.setCursor(0, 8);
-            display.println(F("WR:FAIL"));
-            display.println(F("Data mismatch"));
-            display.display();
+            showWriteStatus(TYPE_RW, false);
           }
         } else {
-          // No device found after write
-          errBeep();
-          display.clearDisplay();
-          display.setTextSize(1);
-          display.setCursor(0, 8);
-          display.println(F("WR:FAIL"));
-          display.println(F("CHK:FAIL"));
-          display.display();
+          showWriteStatus(TYPE_RW, false);
         }
-      } else {
+      } else if (tempTp == TYPE_13) {
         if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
-          res = (memcmp(rfid.uid.uidByte, newID, min(rfid.uid.size, (size_t)RW1990_UID_SIZE)) == 0);
+          res = rfid_write_uid(newID, tempUidLen);
           rfid.PICC_HaltA();
         }
-        
-        display.clearDisplay();
-        display.setCursor(0, 8);
-        if (res) {
-          okBeep();
-          if (tempTp == TYPE_13) display.println(F("13 OK"));
-          else if (tempTp == TYPE_125) display.println(F("125 OK"));
-          display.println(F("CHK:PASS"));
-        } else {
-          errBeep();
-          display.println(F("WR:FAIL"));
-          display.println(F("CHK:FAIL"));
-        }
-        display.display();
+        showWriteStatus(TYPE_13, res);
+      } else {
+        // TYPE_125 placeholder
+        showWriteStatus(TYPE_125, false);
       }
       
       delay(1800);
@@ -1119,6 +1155,7 @@ void loop() {
       bool success = true;
       MFRC522::StatusCode status;
       byte zeros[16] = {0};
+      byte failSector = 0;
       
       MFRC522::MIFARE_Key key;
       for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
@@ -1128,15 +1165,28 @@ void loop() {
         
         status = rfid.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, &key, &(rfid.uid));
         if (status != MFRC522::STATUS_OK) {
+          Serial.print(F("RF:ERASE:AUTH:FAIL s="));
+          Serial.print(sector);
+          Serial.print(F(" rc="));
+          Serial.println((int)status);
           success = false;
+          failSector = sector;
           break;
         }
         
         status = rfid.MIFARE_Write(blockAddr, zeros, 16);
         if (status != MFRC522::STATUS_OK) {
+          Serial.print(F("RF:ERASE:WR:FAIL s="));
+          Serial.print(sector);
+          Serial.print(F(" rc="));
+          Serial.println((int)status);
           success = false;
+          failSector = sector;
           break;
         }
+        Serial.print(F("RF:ERASE:s="));
+        Serial.print(sector);
+        Serial.println(F(":OK"));
       }
       
       rfid.PICC_HaltA();
@@ -1165,7 +1215,8 @@ void loop() {
         }
         okBeep();
       } else {
-        display.println(F("Protect?"));
+        display.print(F("Fail s="));
+        display.println(failSector);
         errBeep();
       }
       
