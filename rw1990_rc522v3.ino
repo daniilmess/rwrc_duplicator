@@ -469,7 +469,7 @@ void factoryReset() {
   asm volatile ("jmp 0");
 }
 
-void drawHeader(const char* txt) {
+void drawKeyInfo(const char* txt) {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
@@ -478,7 +478,7 @@ void drawHeader(const char* txt) {
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 }
 
-void drawHeader(const __FlashStringHelper* txt) {
+void drawKeyInfo(const __FlashStringHelper* txt) {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
@@ -488,7 +488,7 @@ void drawHeader(const __FlashStringHelper* txt) {
 }
 
 void drawKeyInfo(const DisplayKeyInfo& info) {
-  drawHeader(info.header);
+  drawKeyInfo(info.header);
   if (info.showUID && info.uid) {
     display.setCursor(0, 14);
     formatUID(info.type, info.uid, info.uidLen);
@@ -534,7 +534,7 @@ void returnToDiagnostics(uint8_t cursorPos) {
 }
 
 void drawList() {
-  drawHeader("Keys");
+  drawKeyInfo("Keys");
   int start = max(0, selKey - 1);
   for (int i = 0; i < 3; i++) {
     int idx = start + i;
@@ -604,7 +604,7 @@ void drawSavedKeyDetail() {
 
 
 void drawConfirmDelete() {
-  drawHeader("Delete key?");
+  drawKeyInfo("Delete key?");
   display.setCursor(4, 14);
   display.println(deleteConfirm ? "> YES   NO" : "  YES > NO");
   display.display();
@@ -907,7 +907,7 @@ void loop() {
         } else {
           snprintf(hdr, sizeof(hdr), "WR RF: %s", rfidChipName(chipType));
         }
-        drawHeader(hdr);
+        drawKeyInfo(hdr);
         display.setCursor(0, 14);
         formatUID(tempTp, newID, tempUidLen);
         display.setCursor(0, 24);
@@ -1045,7 +1045,7 @@ void loop() {
     }
 
     case DIAG_RF_ERASE: {
-      drawHeader(F("RF Erase"));
+      drawKeyInfo(F("RF Erase"));
       display.setCursor(0, 14);
       display.println(F("Place card..."));
       display.display();
@@ -1061,7 +1061,7 @@ void loop() {
       }
       
       if (!cardPresent) {
-        drawHeader(F("RF Erase"));
+        drawKeyInfo(F("RF Erase"));
         display.setCursor(0, 16);
         display.println(F("Timeout"));
         display.display();
@@ -1071,7 +1071,7 @@ void loop() {
         break;
       }
       
-      drawHeader(F("RF Erase"));
+      drawKeyInfo(F("RF Erase"));
       display.setCursor(0, 14);
       display.println(F("Erase..."));
       display.display();
@@ -1106,7 +1106,7 @@ void loop() {
       
       // After erasing, read and display card state
       delay(200);
-      drawHeader(F("RF Erase"));
+      drawKeyInfo(F("RF Erase"));
       display.setCursor(0, 14);
       
       if (success) {
