@@ -637,15 +637,33 @@ void setup() {
   Serial.println(F("START"));
 
   Wire.begin();
+  Wire.setClock(100000);
+  delay(100);
+
   Wire.beginTransmission(OLED_ADDR);
-  if (Wire.endTransmission() != 0) {
+  uint8_t i2cRC = Wire.endTransmission();
+  Serial.print(F("OLED:I2C:RC="));
+  Serial.println(i2cRC);
+  if (i2cRC != 0) {
     Serial.println(F("OLED:I2C:NO_3C"));
     fatalBlinkYellow();
   }
 
-  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-    Serial.println(F("OLED:BEGIN:FAIL"));
-    fatalBlinkYellow();
+  {
+    bool oledOk = false;
+    for (uint8_t attempt = 1; attempt <= 3 && !oledOk; attempt++) {
+      Serial.print(F("OLED:BEGIN:TRY "));
+      Serial.println(attempt);
+      if (display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+        oledOk = true;
+      } else {
+        delay(200);
+      }
+    }
+    if (!oledOk) {
+      Serial.println(F("OLED:BEGIN:FAIL"));
+      fatalBlinkYellow();
+    }
   }
 
   display.clearDisplay();
