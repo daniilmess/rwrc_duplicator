@@ -115,26 +115,37 @@ bool busy = false;
 bool inScanMode = false;
 
 
-const char* owChipName(uint8_t chip) {
+#ifdef __AVR__
+// Returns available SRAM by measuring the gap between the stack pointer
+// and the top of the heap (or __heap_start if no heap allocation yet).
+// Used for diagnostics before OLED initialization.
+static int freeRam() {
+  extern int __heap_start, *__brkval;
+  int v;
+  return (int)&v - (__brkval == 0 ? (int)&__heap_start : (int)__brkval);
+}
+#endif
+
+void printOwChipNameToDisplay(uint8_t chip) {
   switch (chip) {
-    case OW_RW1990_1: return "RW1990.1";
-    case OW_RW1990_2: return "RW1990.2";
-    case OW_DS1990A:  return "DS1990A";
-    case OW_TM2004:   return "TM2004";
-    case OW_TM01:     return "TM01";
-    default:          return "Unknown";
+    case OW_RW1990_1: display.print(F("RW1990.1")); break;
+    case OW_RW1990_2: display.print(F("RW1990.2")); break;
+    case OW_DS1990A:  display.print(F("DS1990A"));  break;
+    case OW_TM2004:   display.print(F("TM2004"));   break;
+    case OW_TM01:     display.print(F("TM01"));     break;
+    default:          display.print(F("Unknown"));  break;
   }
 }
 
-const char* rfidChipName(uint8_t chip) {
+void printRfidChipNameToDisplay(uint8_t chip) {
   switch (chip) {
-    case RFID_EM4100:  return "EM4100";
-    case RFID_HID:     return "HID";
-    case RFID_MIFARE:  return "Mifare";
-    case RFID_DESFIRE: return "DESFire";
-    case RFID_T5577:   return "T5577";
-    case RFID_EM4305:  return "EM4305";
-    default:           return "Unknown";
+    case RFID_EM4100:  display.print(F("EM4100"));  break;
+    case RFID_HID:     display.print(F("HID"));     break;
+    case RFID_MIFARE:  display.print(F("Mifare"));  break;
+    case RFID_DESFIRE: display.print(F("DESFire")); break;
+    case RFID_T5577:   display.print(F("T5577"));   break;
+    case RFID_EM4305:  display.print(F("EM4305"));  break;
+    default:           display.print(F("Unknown")); break;
   }
 }
 
@@ -195,23 +206,22 @@ uint8_t detectRFIDChip() {
 }
 
 
-// Helper function to check Family/CRC errors and return error message
+// Helper function to check Family/CRC errors and return flash string
 // Validates RW1990 family byte (buf[0]) and CRC checksum (buf[7])
-// Returns: Error status string ("OK", "Family:ERR", "CRC:ERR", or "Family:ERR CRC:ERR")
-const char* rw1990_check_errors(const uint8_t* buf) {
-  byte crc = ow.crc8(buf, 7);
+const __FlashStringHelper* rw1990_check_errors(const uint8_t* buf) {
   bool familyOk = (buf[0] == 0x01);
-  bool crcOk = (crc == buf[7]);
-  
-  if (!familyOk && !crcOk) {
-    return "Family:ERR CRC:ERR";
-  } else if (!familyOk) {
-    return "Family:ERR";
-  } else if (!crcOk) {
-    return "CRC:ERR";
-  } else {
-    return "OK";
-  }
+  bool crcOk = (ow.crc8(buf, 7) == buf[7]);
+  if (!familyOk && !crcOk) return F("Family:ERR CRC:ERR");
+  if (!familyOk) return F("Family:ERR");
+  if (!crcOk) return F("CRC:ERR");
+  return F("OK");
+}
+
+// Returns true when buf contains a valid RW1990 UID:
+// family byte (buf[0]) == 0x01 AND CRC (buf[7]) matches.
+// Replaces strcmp(rw1990_check_errors(buf), "OK") comparisons.
+static bool rw1990_is_ok(const uint8_t* buf) {
+  return (buf[0] == 0x01) && (ow.crc8(buf, 7) == buf[7]);
 }
 
 // Read RW1990 key and output diagnostics to serial
@@ -406,12 +416,12 @@ void loadMasterKeys() {
 void loadEEPROM() {
   uint8_t firstBootFlag = EEPROM.read(EEPROM_FIRST_BOOT_FLAG);
   
-  if (firstBootFlag != 0x01) {
+  if (firstBootFlag != 0x02) {
     Serial.print(F("BOOT:FIRST CNT:"));
     Serial.println(MASTER_KEYS_COUNT);
     loadMasterKeys();
     saveEEPROM();
-    EEPROM.update(EEPROM_FIRST_BOOT_FLAG, 0x01);
+    EEPROM.update(EEPROM_FIRST_BOOT_FLAG, 0x02);
   } else {
     Serial.println(F("EEPROM:LOAD"));
     keyCnt = EEPROM.read(EEPROM_KEY_COUNT);
@@ -482,13 +492,23 @@ void drawKeyInfoAndShow(const char* txt) {
   display.display();
 }
 
-void drawKeyInfoDual(const char* prefix, const char* suffix) {
+void drawKeyInfoOwChip(const __FlashStringHelper* prefix, uint8_t chip) {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
   display.print(prefix);
-  display.println(suffix);
+  printOwChipNameToDisplay(chip);
+  display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+}
+
+void drawKeyInfoRfidChip(const __FlashStringHelper* prefix, uint8_t chip) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.print(prefix);
+  printRfidChipNameToDisplay(chip);
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 }
 
@@ -651,6 +671,10 @@ void setup() {
 
   {
     bool oledOk = false;
+#ifdef __AVR__
+    Serial.print(F("RAM:FREE="));
+    Serial.println(freeRam());
+#endif
     for (uint8_t attempt = 1; attempt <= 3 && !oledOk; attempt++) {
       Serial.print(F("OLED:BEGIN:TRY "));
       Serial.println(attempt);
@@ -769,15 +793,14 @@ void loop() {
       // Try to read RW1990 first
       if (rw1990_read(tempBuf)) {
         tempOwChip = detectOneWireChip(tempBuf);
-        const char* err = rw1990_check_errors(tempBuf);
-        drawKeyInfoDual("RW: ", owChipName(tempOwChip));
+        drawKeyInfoOwChip(F("RW: "), tempOwChip);
         display.setCursor(0, 14);
         formatUID(TYPE_RW, tempBuf, RW1990_UID_SIZE);
         display.setCursor(0, 24);
-        display.print("| ");
-        display.print(err);
+        display.print(F("| "));
+        display.print(rw1990_check_errors(tempBuf));
         display.display();
-        if (strcmp(err, "OK") == 0) okBeep(); else errBeep();
+        if (rw1990_is_ok(tempBuf)) okBeep(); else errBeep();
         tempTp = TYPE_RW;
         tempRfidChip = RFID_UNKNOWN;
         tempUidLen = RW1990_UID_SIZE;
@@ -795,7 +818,7 @@ void loop() {
         memcpy(tempBuf, rfid.uid.uidByte, tempUidLen);
         tempRfidChip = detectRFIDChip();
         rfid.PICC_HaltA();
-        drawKeyInfoDual("RF 13.56: ", rfidChipName(tempRfidChip));
+        drawKeyInfoRfidChip(F("RF 13.56: "), tempRfidChip);
         display.setCursor(0, 14);
         formatUID(TYPE_13, tempBuf, tempUidLen);
         display.display();
@@ -919,9 +942,9 @@ void loop() {
       {
         uint8_t chipType = (tempTp == TYPE_RW) ? keys[selKey].owChip : keys[selKey].rfidChip;
         if (tempTp == TYPE_RW) {
-          drawKeyInfoDual("WR: ", owChipName(chipType));
+          drawKeyInfoOwChip(F("WR: "), chipType);
         } else {
-          drawKeyInfoDual("WR RF: ", rfidChipName(chipType));
+          drawKeyInfoRfidChip(F("WR RF: "), chipType);
         }
         display.setCursor(0, 14);
         formatUID(tempTp, newID, tempUidLen);
@@ -990,15 +1013,14 @@ void loop() {
         uint8_t readBuf[RW1990_UID_SIZE];
         if (rw1990_read(readBuf)) {
           uint8_t rchip = detectOneWireChip(readBuf);
-          const char* rerr = rw1990_check_errors(readBuf);
-          drawKeyInfoDual("RW: ", owChipName(rchip));
+          drawKeyInfoOwChip(F("RW: "), rchip);
           display.setCursor(0, 14);
           formatUID(TYPE_RW, readBuf, RW1990_UID_SIZE);
           display.setCursor(0, 24);
-          display.print("| ");
-          display.print(rerr);
+          display.print(F("| "));
+          display.print(rw1990_check_errors(readBuf));
           display.display();
-          if (strcmp(rerr, "OK") == 0) okBeep(); else errBeep();
+          if (rw1990_is_ok(readBuf)) okBeep(); else errBeep();
           if (memcmp(readBuf, newID, RW1990_UID_SIZE) != 0) {
             // Data mismatch - write failed, show error overlay
             delay(1000);
@@ -1015,8 +1037,8 @@ void loop() {
           display.clearDisplay();
           display.setTextSize(1);
           display.setCursor(0, 8);
-          display.println("WR:FAIL");
-          display.println("CHK:FAIL");
+          display.println(F("WR:FAIL"));
+          display.println(F("CHK:FAIL"));
           display.display();
         }
       } else {
@@ -1029,13 +1051,13 @@ void loop() {
         display.setCursor(0, 8);
         if (res) {
           okBeep();
-          if (tempTp == TYPE_13) display.println("13 OK");
-          else if (tempTp == TYPE_125) display.println("125 OK");
-          display.println("CHK:PASS");
+          if (tempTp == TYPE_13) display.println(F("13 OK"));
+          else if (tempTp == TYPE_125) display.println(F("125 OK"));
+          display.println(F("CHK:PASS"));
         } else {
           errBeep();
-          display.println("WR:FAIL");
-          display.println("CHK:FAIL");
+          display.println(F("WR:FAIL"));
+          display.println(F("CHK:FAIL"));
         }
         display.display();
       }
