@@ -337,6 +337,71 @@ void rw1990_write_byte(uint8_t data) {
   }
 }
 
+// Authenticate a MIFARE sector using Key A with the given key.
+// sector: 0-15 for MIFARE Classic 1K.
+// Returns true on success, false on failure with Serial diagnostic.
+bool mifare_auth_sector(byte sector, MFRC522::MIFARE_Key* key) {
+  byte blockAddr = sector * 4;
+  MFRC522::StatusCode status = rfid.PCD_Authenticate(
+    MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, key, &(rfid.uid));
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("AUTH:FAIL s="));
+    Serial.println(sector);
+    return false;
+  }
+  return true;
+}
+
+// Write data to MIFARE block 4 (sector 1, first data block) using default key.
+// Selects the card, authenticates sector 1, writes 16 bytes, verifies by read-back.
+// Returns true on success.
+bool rfid_mifare_write(const uint8_t* data, uint8_t dataLen) {
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+    Serial.println(F("RF:NODEV"));
+    return false;
+  }
+
+  Serial.print(F("RF:WR UID:"));
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    if (rfid.uid.uidByte[i] < 0x10) Serial.print('0');
+    Serial.print(rfid.uid.uidByte[i], HEX);
+    Serial.print(' ');
+  }
+  Serial.println();
+
+  MFRC522::MIFARE_Key key;
+  for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
+
+  if (!mifare_auth_sector(1, &key)) {
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return false;
+  }
+
+  byte writeData[16] = {0};
+  memcpy(writeData, data, min(dataLen, (uint8_t)16));
+
+  MFRC522::StatusCode status = rfid.MIFARE_Write(4, writeData, 16);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.println(F("RF:WR:FAIL"));
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return false;
+  }
+
+  // Read back to verify
+  byte readBuf[18];
+  byte readLen = sizeof(readBuf);
+  status = rfid.MIFARE_Read(4, readBuf, &readLen);
+  bool success = (status == MFRC522::STATUS_OK) &&
+                 (memcmp(readBuf, writeData, 16) == 0);
+  Serial.println(success ? F("RF:VRF:OK") : F("RF:VRF:FAIL"));
+
+  rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
+  return success;
+}
+
 void toneBeep(int hz, int ms) {
   tone(BUZZ, hz, ms);
   delay(ms + 10);
@@ -959,22 +1024,19 @@ void loop() {
           display.display();
         }
       } else {
-        if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
-          res = (memcmp(rfid.uid.uidByte, newID, min(rfid.uid.size, (size_t)RW1990_UID_SIZE)) == 0);
-          rfid.PICC_HaltA();
-        }
-        
+        // For MIFARE RF cards: authenticate sector 1, write data, verify
+        res = rfid_mifare_write(newID, tempUidLen);
+
         display.clearDisplay();
         display.setCursor(0, 8);
         if (res) {
           okBeep();
-          if (tempTp == TYPE_RFID_13M) display.println("RF13 OK");
-          else if (tempTp == TYPE_RFID_125K) display.println("RF125 OK");
-          display.println("CHK:PASS");
+          if (tempTp == TYPE_RFID_13M) display.println(F("RF13 OK"));
+          else if (tempTp == TYPE_RFID_125K) display.println(F("RF125 OK"));
+          display.println(F("WR:PASS"));
         } else {
           errBeep();
-          display.println("WR:FAIL");
-          display.println("CHK:FAIL");
+          display.println(F("WR:FAIL"));
         }
         display.display();
       }
@@ -1040,19 +1102,34 @@ void loop() {
       MFRC522::MIFARE_Key key;
       for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
       
-      for (byte sector = 1; sector < 4 && success; sector++) {
-        byte blockAddr = sector * 4;
-        
-        status = rfid.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, &key, &(rfid.uid));
+      for (byte sector = 1; sector <= 15 && success; sector++) {
+        byte firstBlock = sector * 4;
+
+        // Update display with sector progress
+        diagHeader(F("RF Erase"));
+        display.setCursor(0, 14);
+        display.print(F("Sector "));
+        display.println(sector);
+        display.display();
+
+        // Authenticate this sector (authentication scope is per-sector)
+        status = rfid.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, firstBlock, &key, &(rfid.uid));
         if (status != MFRC522::STATUS_OK) {
+          Serial.print(F("AUTH:FAIL s="));
+          Serial.println(sector);
           success = false;
           break;
         }
-        
-        status = rfid.MIFARE_Write(blockAddr, zeros, 16);
-        if (status != MFRC522::STATUS_OK) {
-          success = false;
-          break;
+
+        // Erase all 3 data blocks in this sector (skip sector trailer at firstBlock+3).
+        // Sector 0 is intentionally skipped (contains manufacturer/UID data).
+        for (byte b = 0; b < 3 && success; b++) {
+          status = rfid.MIFARE_Write(firstBlock + b, zeros, 16);
+          if (status != MFRC522::STATUS_OK) {
+            Serial.print(F("WR:FAIL b="));
+            Serial.println(firstBlock + b);
+            success = false;
+          }
         }
       }
       
