@@ -34,28 +34,9 @@ EncButton enc(ENC_A, ENC_B, ENC_BTN);
 
 
 enum KeyType {
-  TYPE_RW  = 0,
-  TYPE_13  = 1,
-  TYPE_125 = 2,
-};
-
-enum OneWireChipType {
-  OW_RW1990_1 = 0,
-  OW_RW1990_2,
-  OW_DS1990A,
-  OW_TM2004,
-  OW_TM01,
-  OW_UNKNOWN
-};
-
-enum RFIDChipType {
-  RFID_EM4100 = 0,
-  RFID_HID,
-  RFID_MIFARE,
-  RFID_DESFIRE,
-  RFID_T5577,
-  RFID_EM4305,
-  RFID_UNKNOWN
+  TYPE_RW1990 = 0,
+  TYPE_RFID_13M = 1,
+  TYPE_RFID_125K = 2,
 };
 
 struct KeyRec {
@@ -64,19 +45,16 @@ struct KeyRec {
   uint8_t  uidLen;
   char     name[16];
   bool     isMaster;
-  uint8_t  owChip;
-  uint8_t  rfidChip;
 };
-
 
 KeyRec keys[MAX_KEYS];
 uint8_t keyCnt = 0;
 
 const KeyRec PROGMEM masterKeys[] = {
-  {TYPE_RW,  {0x01, 0xCA, 0xC9, 0xAF, 0x02, 0x00, 0x00, 0xC0}, RW1990_UID_SIZE, "home_78",    true, OW_RW1990_1,  RFID_UNKNOWN},
-  {TYPE_13,  {0x04, 0xA1, 0xB2, 0xC3, 0x00, 0x00, 0x00, 0x00}, 4,               "office_card", true, OW_UNKNOWN,   RFID_MIFARE },
-  {TYPE_125, {0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x00, 0x00, 0x00}, 5,               "garage_fob",  true, OW_UNKNOWN,   RFID_EM4100 },
-  {TYPE_RW,  {0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x2F}, RW1990_UID_SIZE, "RW_erase",   true, OW_RW1990_1,  RFID_UNKNOWN}
+  {TYPE_RW1990, {0x01, 0xCA, 0xC9, 0xAF, 0x02, 0x00, 0x00, 0xC0}, RW1990_UID_SIZE, "home_78", true},
+  {TYPE_RFID_13M, {0x04, 0xA1, 0xB2, 0xC3, 0x00, 0x00, 0x00, 0x00}, 4, "office_card", true},
+  {TYPE_RFID_125K, {0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x00, 0x00, 0x00}, 5, "garage_fob", true},
+  {TYPE_RW1990, {0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x2F}, RW1990_UID_SIZE, "RW_erase", true}
 };
 const uint8_t MASTER_KEYS_COUNT = sizeof(masterKeys) / sizeof(masterKeys[0]);
 
@@ -103,9 +81,6 @@ uint8_t tempBuf[RW1990_UID_SIZE];
 uint8_t tempTp = 0;
 uint8_t tempUidLen = 0;
 
-uint8_t tempOwChip = OW_UNKNOWN;
-uint8_t tempRfidChip = RFID_UNKNOWN;
-
 unsigned long tmStart = 0;
 unsigned long lastBeepMs = 0;  // Track last beep time for WRITE mode
 unsigned long lastTickMs = 0;   // Track last tick for scanning
@@ -113,86 +88,6 @@ unsigned long holdStartMs = 0;  // Track hold start for factory reset
 unsigned long scanHoldStartMs = 0;  // Track hold start for scan exit
 bool busy = false;
 bool inScanMode = false;
-
-
-const char* owChipName(uint8_t chip) {
-  switch (chip) {
-    case OW_RW1990_1: return "RW1990.1";
-    case OW_RW1990_2: return "RW1990.2";
-    case OW_DS1990A:  return "DS1990A";
-    case OW_TM2004:   return "TM2004";
-    case OW_TM01:     return "TM01";
-    default:          return "Unknown";
-  }
-}
-
-const char* rfidChipName(uint8_t chip) {
-  switch (chip) {
-    case RFID_EM4100:  return "EM4100";
-    case RFID_HID:     return "HID";
-    case RFID_MIFARE:  return "Mifare";
-    case RFID_DESFIRE: return "DESFire";
-    case RFID_T5577:   return "T5577";
-    case RFID_EM4305:  return "EM4305";
-    default:           return "Unknown";
-  }
-}
-
-// Probe the OneWire bus to identify the chip type.
-// Takes the already-read 8-byte ROM (uid[0] is the family code).
-// For family 0x01, sends write-enable and checks acknowledgment to
-// distinguish RW1990.1 from RW1990.2.
-uint8_t detectOneWireChip(const uint8_t* uid) {
-  switch (uid[0]) {
-    case 0x70: return OW_TM2004;
-    case 0x2D: return OW_TM01;
-    case 0x01: {
-      // Probe write-enable: RW1990.2 pulls the bus low as acknowledgment
-      ow.reset();
-      ow.skip();
-      ow.write(0xD1);
-      digitalWrite(OW_PIN, LOW);
-      pinMode(OW_PIN, OUTPUT);
-      delayMicroseconds(60);
-      pinMode(OW_PIN, INPUT);
-      digitalWrite(OW_PIN, HIGH);
-      delayMicroseconds(200);
-      bool ack = !digitalRead(OW_PIN);
-      // Re-lock write mode (short pulse = lock)
-      ow.reset();
-      ow.skip();
-      ow.write(0xD1);
-      digitalWrite(OW_PIN, LOW);
-      pinMode(OW_PIN, OUTPUT);
-      delayMicroseconds(10);
-      pinMode(OW_PIN, INPUT);
-      digitalWrite(OW_PIN, HIGH);
-      delay(5);
-      return ack ? OW_RW1990_2 : OW_RW1990_1;
-    }
-    default: return OW_UNKNOWN;
-  }
-}
-
-// Identify the RFID chip using the SAK byte already held in rfid.uid.
-// Must be called before rfid.PICC_HaltA().
-// Note: ISO 14443-4 cards with 7-byte UIDs are assumed DESFire; with shorter
-// UIDs they are heuristically classified as HID. EM4100 is 125 kHz and will
-// not be detected here (MFRC522 reads 13.56 MHz only).
-uint8_t detectRFIDChip() {
-  MFRC522::PICC_Type piccType = rfid.PICC_GetType(rfid.uid.sak);
-  switch (piccType) {
-    case MFRC522::PICC_TYPE_MIFARE_MINI:
-    case MFRC522::PICC_TYPE_MIFARE_1K:
-    case MFRC522::PICC_TYPE_MIFARE_4K:
-    case MFRC522::PICC_TYPE_MIFARE_UL:   return RFID_MIFARE;
-    case MFRC522::PICC_TYPE_MIFARE_DESFIRE: return RFID_DESFIRE;
-    case MFRC522::PICC_TYPE_ISO_14443_4:
-      return (rfid.uid.size == 7) ? RFID_DESFIRE : RFID_HID;
-    default:
-      return RFID_UNKNOWN;
-  }
-}
 
 
 // Helper function to check Family/CRC errors and return error message
@@ -246,6 +141,87 @@ bool rw1990_read(uint8_t* buf) {
   return true;
 }
 
+// Unified function: read RW1990 key and display with error status
+// Parameters:
+//   buf: Buffer to store 8-byte UID
+//   clearAndDraw: true to clear screen and draw header, false to add to existing display
+// Returns:
+//   true if key is found and displayed
+//   false if no key is present
+// Display: Shows UID at line 14, error status at line 24
+bool rw1990_read_and_display(uint8_t* buf, bool clearAndDraw) {
+  if (!rw1990_read(buf)) {
+    return false;  // No key found
+  }
+  
+  // Key found - display it with error status
+  if (clearAndDraw) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println(F("RW1990 ID"));
+    display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  }
+  
+  // Display UID
+  display.setCursor(0, 14);
+  formatUID(TYPE_RW1990, buf, RW1990_UID_SIZE);
+  
+  // Display error status on next line
+  display.setCursor(0, 24);
+  display.print(F("| "));
+  const char* errorStatus = rw1990_check_errors(buf);
+  display.print(errorStatus);
+  
+  // Play beep based on error status
+  if (strcmp(errorStatus, "OK") == 0) {
+    okBeep();
+  } else {
+    errBeep();
+  }
+  
+  display.display();
+  return true;
+}
+
+// Unified function: read RF card and display UID
+// Parameters:
+//   buf: Buffer to store UID (up to RW1990_UID_SIZE bytes)
+//   uidLen: Output parameter - actual UID length read from card
+//   clearAndDraw: true to clear screen and draw header, false to add to existing display
+// Returns:
+//   true if card is found and displayed
+//   false if no card is present
+// Display: Shows UID at line 14
+bool rfid_read_and_display(uint8_t* buf, uint8_t* uidLen, bool clearAndDraw) {
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+    return false;  // No card found
+  }
+  
+  *uidLen = min(rfid.uid.size, (uint8_t)RW1990_UID_SIZE);
+  memcpy(buf, rfid.uid.uidByte, *uidLen);
+  rfid.PICC_HaltA();
+  
+  // Card found - display it
+  if (clearAndDraw) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println(F("RF 13.56 MHz"));
+    display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  }
+  
+  display.setCursor(0, 14);
+  formatUID(TYPE_RFID_13M, buf, *uidLen);
+  display.display();
+  
+  okBeep();
+  
+  return true;
+}
+
 bool rw1990_write(const uint8_t* id) {
   uint8_t dummy[RW1990_UID_SIZE];
   // Check if device present (will output diagnostics, may return false for broken keys)
@@ -266,15 +242,27 @@ bool rw1990_write(const uint8_t* id) {
   ow.write(0x33);
   
   // Read and store old ID into global oldID buffer
+  Serial.print(F("ID: "));
   for (uint8_t i = 0; i < RW1990_UID_SIZE; i++) {
     oldID[i] = ow.read();
+    Serial.print(oldID[i] < 16 ? "0" : "");
+    Serial.print(oldID[i], HEX);
+    Serial.print(' ');
   }
+  Serial.println();
 
-  // Debug: show id to be written
+  // Debug: show newID and tempBuf
   Serial.print(F("newID:"));
   for (uint8_t i = 0; i < RW1990_UID_SIZE; i++) {
-    Serial.print(id[i] < 16 ? "0" : "");
-    Serial.print(id[i], HEX);
+    Serial.print(newID[i] < 16 ? "0" : "");
+    Serial.print(newID[i], HEX);
+    Serial.print(' ');
+  }
+  Serial.println();
+  Serial.print(F("tempBuf:"));
+  for (uint8_t i = 0; i < RW1990_UID_SIZE; i++) {
+    Serial.print(tempBuf[i] < 16 ? "0" : "");
+    Serial.print(tempBuf[i], HEX);
     Serial.print(' ');
   }
   Serial.println();
@@ -354,13 +342,6 @@ void toneBeep(int hz, int ms) {
   delay(ms + 10);
 }
 
-void fatalBlinkYellow() {
-  while (1) {
-    digitalWrite(LED_Y, HIGH); delay(200);
-    digitalWrite(LED_Y, LOW);  delay(200);
-  }
-}
-
 void okBeep() {
   digitalWrite(LED_G, HIGH);
   toneBeep(1400, 100); delay(20);
@@ -435,15 +416,13 @@ void saveEEPROM() {
   }
 }
 
-bool addKey(uint8_t tp, const uint8_t* d, uint8_t len, uint8_t owChip, uint8_t rfidChip) {
+bool addKey(uint8_t tp, const uint8_t* d, uint8_t len) {
   if (keyCnt >= MAX_KEYS) return false;
   keys[keyCnt].type = tp;
   memcpy(keys[keyCnt].uid, d, RW1990_UID_SIZE);
   keys[keyCnt].uidLen = len;
   keys[keyCnt].name[0] = '\0';
   keys[keyCnt].isMaster = false;
-  keys[keyCnt].owChip = owChip;
-  keys[keyCnt].rfidChip = rfidChip;
   keyCnt++;
   saveEEPROM();
   return true;
@@ -468,7 +447,7 @@ void factoryReset() {
   asm volatile ("jmp 0");
 }
 
-void drawKeyInfo(const char* txt) {
+void drawHeader(const char* txt) {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
@@ -477,18 +456,11 @@ void drawKeyInfo(const char* txt) {
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 }
 
-void drawKeyInfoAndShow(const char* txt) {
-  drawKeyInfo(txt);
-  display.display();
-}
-
-void drawKeyInfoDual(const char* prefix, const char* suffix) {
+void diagHeader(const __FlashStringHelper* title) {
   display.clearDisplay();
   display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
-  display.print(prefix);
-  display.println(suffix);
+  display.println(title);
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 }
 
@@ -505,9 +477,16 @@ void drawMain() {
 }
 
 void drawDiagnostics() {
-  drawKeyInfo("DIAG");
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println(F("DIAG"));
+  display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  
   display.setCursor(4, 12);
   display.print(cursor == 0 ? "> RF Erase" : "  RF Erase");
+  
   display.display();
 }
 
@@ -519,7 +498,7 @@ void returnToDiagnostics(uint8_t cursorPos) {
 }
 
 void drawList() {
-  drawKeyInfo("Keys");
+  drawHeader("Keys");
   int start = max(0, selKey - 1);
   for (int i = 0; i < 3; i++) {
     int idx = start + i;
@@ -527,24 +506,26 @@ void drawList() {
     display.setCursor(4, 12 + i * 8);
     display.print(idx == selKey ? ">" : " ");
     
-    if (keys[idx].type == TYPE_RW) display.print("RW ");
-    else if (keys[idx].type == TYPE_13) display.print("13 ");
-    else if (keys[idx].type == TYPE_125) display.print("125 ");
-
-    if (keys[idx].name[0] != '\0') {
+    if (keys[idx].isMaster && keys[idx].name[0] != '\0') {
+      if (keys[idx].type == TYPE_RW1990) display.print("RW ");
+      else if (keys[idx].type == TYPE_RFID_13M) display.print("RF13 ");
+      else if (keys[idx].type == TYPE_RFID_125K) display.print("RF125 ");
       display.print(keys[idx].name);
     } else {
-      if (keys[idx].type == TYPE_RW) {
+      if (keys[idx].type == TYPE_RW1990) {
+        display.print("RW ");
         for (uint8_t j = 1; j < 7; j++) {
           printHex(keys[idx].uid[j]);
           if (j < 6 && j % 2 == 0) display.print(' ');
         }
-      } else if (keys[idx].type == TYPE_13) {
+      } else if (keys[idx].type == TYPE_RFID_13M) {
+        display.print("RF13 ");
         for (uint8_t j = 0; j < keys[idx].uidLen && j < 4; j++) {
           printHex(keys[idx].uid[j]);
           if (j < keys[idx].uidLen - 1) display.print(' ');
         }
-      } else {
+      } else if (keys[idx].type == TYPE_RFID_125K) {
+        display.print("RF125 ");
         for (uint8_t j = 0; j < keys[idx].uidLen && j < 5; j++) {
           printHex(keys[idx].uid[j]);
           if (j < keys[idx].uidLen - 1) display.print(' ');
@@ -560,13 +541,11 @@ void drawSavedKeyDetail() {
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
-  if (keys[selKey].type == TYPE_RW)       display.println(F("RW Key"));
-  else if (keys[selKey].type == TYPE_13)  display.println(F("13 MHz Key"));
-  else                                    display.println(F("125 kHz Key"));
+  display.println(getKeyTypeStr(keys[selKey].type));
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
   display.setCursor(0, 12);
   
-  if (keys[selKey].type == TYPE_RW) {
+  if (keys[selKey].type == TYPE_RW1990) {
     for (uint8_t j = 1; j < 7; j++) {
       printHex(keys[selKey].uid[j]);
       if (j < 6 && j % 2 == 1) display.print(' ');
@@ -589,7 +568,7 @@ void drawSavedKeyDetail() {
 
 
 void drawConfirmDelete() {
-  drawKeyInfo("Delete key?");
+  drawHeader("Delete key?");
   display.setCursor(4, 14);
   display.println(deleteConfirm ? "> YES   NO" : "  YES > NO");
   display.display();
@@ -610,8 +589,15 @@ void printHex(uint8_t b) {
   display.print(b, HEX);
 }
 
+const __FlashStringHelper* getKeyTypeStr(uint8_t type) {
+  if (type == TYPE_RW1990) return F("RW1990 ID");
+  if (type == TYPE_RFID_13M) return F("RF 13.56 MHz");
+  if (type == TYPE_RFID_125K) return F("RF 125 kHz");
+  return F("Key ID");
+}
+
 void formatUID(uint8_t type, const uint8_t* uid, uint8_t uidLen) {
-  if (type == TYPE_RW && uidLen == 8) {
+  if (type == TYPE_RW1990 && uidLen == 8) {
     printHex(uid[0]); display.print(' ');
     printHex(uid[1]); printHex(uid[2]); display.print(' ');
     printHex(uid[3]); printHex(uid[4]); display.print(' ');
@@ -625,6 +611,20 @@ void formatUID(uint8_t type, const uint8_t* uid, uint8_t uidLen) {
   }
 }
 
+void displayKeyUID(uint8_t type, const uint8_t* uid, uint8_t uidLen, bool clearAndDraw) {
+  if (clearAndDraw) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println(getKeyTypeStr(type));
+    display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  }
+  display.setCursor(0, 14);
+  formatUID(type, uid, uidLen);
+  display.display();
+}
+
 
 
 void setup() {
@@ -636,26 +636,13 @@ void setup() {
   Serial.begin(115200);
   Serial.println(F("START"));
 
-  Wire.begin();
-  Wire.beginTransmission(OLED_ADDR);
-  if (Wire.endTransmission() != 0) {
-    Serial.println(F("OLED:I2C:NO_3C"));
-    fatalBlinkYellow();
-  }
-
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-    Serial.println(F("OLED:BEGIN:FAIL"));
-    fatalBlinkYellow();
+    Serial.println(F("OLED:ERR"));
+    while (1);
   }
 
   display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 8);
-  display.println(F("OLED OK"));
-  display.println(F("rwrc_duplicator"));
   display.display();
-  delay(300);
 
   SPI.begin();
   rfid.PCD_Init();
@@ -749,19 +736,8 @@ void loop() {
       }
 
       // Try to read RW1990 first
-      if (rw1990_read(tempBuf)) {
-        tempOwChip = detectOneWireChip(tempBuf);
-        const char* err = rw1990_check_errors(tempBuf);
-        drawKeyInfoDual("RW: ", owChipName(tempOwChip));
-        display.setCursor(0, 14);
-        formatUID(TYPE_RW, tempBuf, RW1990_UID_SIZE);
-        display.setCursor(0, 24);
-        display.print("| ");
-        display.print(err);
-        display.display();
-        if (strcmp(err, "OK") == 0) okBeep(); else errBeep();
-        tempTp = TYPE_RW;
-        tempRfidChip = RFID_UNKNOWN;
+      if (rw1990_read_and_display(tempBuf, true)) {
+        tempTp = TYPE_RW1990;
         tempUidLen = RW1990_UID_SIZE;
         
         tmStart = millis();
@@ -772,18 +748,8 @@ void loop() {
       }
 
       // If no RW1990, try RF card
-      if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
-        tempUidLen = min(rfid.uid.size, (uint8_t)RW1990_UID_SIZE);
-        memcpy(tempBuf, rfid.uid.uidByte, tempUidLen);
-        tempRfidChip = detectRFIDChip();
-        rfid.PICC_HaltA();
-        drawKeyInfoDual("RF 13.56: ", rfidChipName(tempRfidChip));
-        display.setCursor(0, 14);
-        formatUID(TYPE_13, tempBuf, tempUidLen);
-        display.display();
-        okBeep();
-        tempTp = TYPE_13;
-        tempOwChip = OW_UNKNOWN;
+      if (rfid_read_and_display(tempBuf, &tempUidLen, true)) {
+        tempTp = TYPE_RFID_13M;
         
         tmStart = millis();
         mode = READ_RESULT;
@@ -806,7 +772,7 @@ void loop() {
       }
       
       if (enc.click()) {
-        if (addKey(tempTp, tempBuf, tempUidLen, tempOwChip, tempRfidChip)) okBeep();
+        if (addKey(tempTp, tempBuf, tempUidLen)) okBeep();
         else errBeep();
         
         mode = READ_KEY;
@@ -899,12 +865,11 @@ void loop() {
 
     case WRITE: {
       {
-        uint8_t chipType = (tempTp == TYPE_RW) ? keys[selKey].owChip : keys[selKey].rfidChip;
-        if (tempTp == TYPE_RW) {
-          drawKeyInfoDual("WR: ", owChipName(chipType));
-        } else {
-          drawKeyInfoDual("WR RF: ", rfidChipName(chipType));
-        }
+        char hdr[21];  // "Writing RW/RF: " (12) + up to 8 char name + null
+        if (tempTp == TYPE_RW1990) strcpy(hdr, "Writing RW: ");
+        else strcpy(hdr, "Writing RF: ");
+        if (keys[selKey].name[0] != '\0') strncat(hdr, keys[selKey].name, sizeof(hdr) - strlen(hdr) - 1);
+        drawHeader(hdr);
         display.setCursor(0, 14);
         formatUID(tempTp, newID, tempUidLen);
         display.setCursor(0, 24);
@@ -933,16 +898,16 @@ void loop() {
         }
         
         bool devicePresent = false;
-        if (tempTp == TYPE_RW) {
+        if (tempTp == TYPE_RW1990) {
           // First read for contact stability check
           ow.reset_search();
           devicePresent = ow.search(tempBuf);
           if (devicePresent) {
-            delay(50);
+            delay(150);
             // Second read to verify stable contact
             ow.reset_search();
             if (!ow.search(oldID) || memcmp(tempBuf, oldID, RW1990_UID_SIZE) != 0) {
-              // Unstable contact - break and retry
+                Serial.println("Unstable contact - break and retry");
               break;
             }
           }
@@ -965,22 +930,14 @@ void loop() {
       display.print(F("Writing: * * * * * * * *"));
       display.display();
 
-      if (tempTp == TYPE_RW) {
+      if (tempTp == TYPE_RW1990) {
         res = rw1990_write(newID);
         
         // After write, read and display the result
         uint8_t readBuf[RW1990_UID_SIZE];
-        if (rw1990_read(readBuf)) {
-          uint8_t rchip = detectOneWireChip(readBuf);
-          const char* rerr = rw1990_check_errors(readBuf);
-          drawKeyInfoDual("RW: ", owChipName(rchip));
-          display.setCursor(0, 14);
-          formatUID(TYPE_RW, readBuf, RW1990_UID_SIZE);
-          display.setCursor(0, 24);
-          display.print("| ");
-          display.print(rerr);
-          display.display();
-          if (strcmp(rerr, "OK") == 0) okBeep(); else errBeep();
+        if (rw1990_read_and_display(readBuf, true)) {
+          // rw1990_read_and_display() has already shown the result and played appropriate beep
+          // Just check if data matches what we wrote
           if (memcmp(readBuf, newID, RW1990_UID_SIZE) != 0) {
             // Data mismatch - write failed, show error overlay
             delay(1000);
@@ -1011,8 +968,8 @@ void loop() {
         display.setCursor(0, 8);
         if (res) {
           okBeep();
-          if (tempTp == TYPE_13) display.println("13 OK");
-          else if (tempTp == TYPE_125) display.println("125 OK");
+          if (tempTp == TYPE_RFID_13M) display.println("RF13 OK");
+          else if (tempTp == TYPE_RFID_125K) display.println("RF125 OK");
           display.println("CHK:PASS");
         } else {
           errBeep();
@@ -1043,7 +1000,7 @@ void loop() {
     }
 
     case DIAG_RF_ERASE: {
-      drawKeyInfo("RF Erase");
+      diagHeader(F("RF Erase"));
       display.setCursor(0, 14);
       display.println(F("Place card..."));
       display.display();
@@ -1059,7 +1016,7 @@ void loop() {
       }
       
       if (!cardPresent) {
-        drawKeyInfo("RF Erase");
+        diagHeader(F("RF Erase"));
         display.setCursor(0, 16);
         display.println(F("Timeout"));
         display.display();
@@ -1069,7 +1026,7 @@ void loop() {
         break;
       }
       
-      drawKeyInfo("RF Erase");
+      diagHeader(F("RF Erase"));
       display.setCursor(0, 14);
       display.println(F("Erase..."));
       display.display();
@@ -1104,7 +1061,7 @@ void loop() {
       
       // After erasing, read and display card state
       delay(200);
-      drawKeyInfo("RF Erase");
+      diagHeader(F("RF Erase"));
       display.setCursor(0, 14);
       
       if (success) {
@@ -1113,13 +1070,7 @@ void loop() {
         // Try to read the card again to show final state
         uint8_t cardBuf[RW1990_UID_SIZE];
         uint8_t cardLen = 0;
-        if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
-          cardLen = min(rfid.uid.size, (uint8_t)RW1990_UID_SIZE);
-          memcpy(cardBuf, rfid.uid.uidByte, cardLen);
-          rfid.PICC_HaltA();
-          display.setCursor(0, 14);
-          formatUID(TYPE_13, cardBuf, cardLen);
-          display.display();
+        if (rfid_read_and_display(cardBuf, &cardLen, false)) {
           display.setCursor(0, 22);
           display.print(F("Card present"));
         }
@@ -1137,4 +1088,3 @@ void loop() {
     }
   }
 }
-
