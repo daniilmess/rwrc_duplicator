@@ -1018,113 +1018,85 @@ void loop() {
         if (tempTp == TYPE_13) {
           Serial.println(F("WRITE_RF13_START"));
 
-          MFRC522::MIFARE_Key key;
-          for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
-
-          byte block = 0;
           byte buffer[18];
           byte size = sizeof(buffer);
           MFRC522::StatusCode status;
 
-          // Authenticate block 0
-          Serial.println(F("RF:AUTH"));
-          status = rfid.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, block, &key, &(rfid.uid));
+          // Read current block 0
+          Serial.println(F("RF:READ_BLOCK_0"));
+          status = rfid.MIFARE_Read(0, buffer, &size);
 
           if (status != MFRC522::STATUS_OK) {
-            Serial.print(F("RF:AUTH_FAIL:"));
+            Serial.print(F("RF:READ_FAIL:"));
             Serial.println(status);
             res = false;
           } else {
-            Serial.println(F("RF:AUTH_OK"));
+            Serial.println(F("RF:READ_OK"));
 
-            // MAGIC COMMAND 0x40 - unlock for magic card
-            Serial.println(F("RF:MAGIC_0x40"));
-            byte magicBuf[1] = {0x40};
-            byte magicSize = 1;
-            byte validBits = 0;
-            MFRC522::StatusCode magicStatus;
-            magicStatus = rfid.PCD_TransceiveData(magicBuf, 1, magicBuf, &magicSize, &validBits, true);
-            if (magicStatus != MFRC522::STATUS_OK) {
-              Serial.print(F("RF:MAGIC_0x40_STATUS:"));
-              Serial.println(magicStatus);
+            // Modify UID bytes (first 4 bytes)
+            for (byte i = 0; i < 4; i++) {
+              buffer[i] = newID[i];
             }
-            delayMicroseconds(100);
 
-            // MAGIC COMMAND 0x43 - enable write mode
-            Serial.println(F("RF:MAGIC_0x43"));
-            magicBuf[0] = 0x43;
-            magicSize = 1;
-            validBits = 0;
-            magicStatus = rfid.PCD_TransceiveData(magicBuf, 1, magicBuf, &magicSize, &validBits, true);
-            if (magicStatus != MFRC522::STATUS_OK) {
-              Serial.print(F("RF:MAGIC_0x43_STATUS:"));
-              Serial.println(magicStatus);
+            Serial.print(F("RF:WRITE:"));
+            for (byte i = 0; i < 4; i++) {
+              if (buffer[i] < 0x10) Serial.print('0');
+              Serial.print(buffer[i], HEX);
+              Serial.print(' ');
             }
-            delayMicroseconds(100);
+            Serial.println();
 
-            // Read block 0
-            Serial.println(F("RF:READ"));
-            status = rfid.MIFARE_Read(block, buffer, &size);
+            // STOP CRYPTO before opening backdoor
+            rfid.PCD_StopCrypto1();
+
+            // OPEN BACKDOOR for magic card using library function
+            Serial.println(F("RF:OPEN_BACKDOOR"));
+            if (!rfid.MIFARE_OpenUidBackdoor(true)) {  // true = log errors
+              Serial.println(F("RF:BACKDOOR_FAIL"));
+              res = false;
+            } else {
+
+            // WRITE block 0
+            Serial.println(F("RF:WRITE_BLOCK_0"));
+            status = rfid.MIFARE_Write(0, buffer, 16);
 
             if (status != MFRC522::STATUS_OK) {
-              Serial.print(F("RF:READ_FAIL:"));
+              Serial.print(F("RF:WRITE_FAIL:"));
               Serial.println(status);
               res = false;
             } else {
-              Serial.println(F("RF:READ_OK"));
+              Serial.println(F("RF:WRITE_OK"));
 
-              // Modify UID bytes only (don't recalculate BCC at buffer[4]:
-              // Chinese magic MIFARE cards handle BCC internally)
-              for (byte i = 0; i < 4; i++) {
-                buffer[i] = newID[i];
-              }
+              // Wake up card for verification
+              Serial.println(F("RF:WAKEUP"));
+              byte atqa_answer[2];
+              byte atqa_size = sizeof(atqa_answer);
+              rfid.PICC_WakeupA(atqa_answer, &atqa_size);
 
-              Serial.print(F("RF:WRITE:"));
-              for (byte i = 0; i < 4; i++) {
-                if (buffer[i] < 0x10) Serial.print('0');
-                Serial.print(buffer[i], HEX);
-                Serial.print(' ');
-              }
-              Serial.println();
+              delay(50);
 
-              // Write block 0
-              status = rfid.MIFARE_Write(block, buffer, 16);
+              // Read block 0 to verify
+              Serial.println(F("RF:VERIFY"));
+              byte verifyBuf[18];
+              byte verifySize = sizeof(verifyBuf);
 
-              if (status != MFRC522::STATUS_OK) {
-                Serial.print(F("RF:WRITE_FAIL:"));
-                Serial.println(status);
-                res = false;
-              } else {
-                Serial.println(F("RF:WRITE_OK"));
-
-                // Verify - read block 0 again
-                Serial.println(F("RF:VERIFY"));
-                byte verifyBuf[18];
-                byte verifySize = sizeof(verifyBuf);
-
-                status = rfid.MIFARE_Read(block, verifyBuf, &verifySize);
-                if (status == MFRC522::STATUS_OK) {
-                  bool match = true;
-                  for (byte i = 0; i < 4; i++) {
-                    if (verifyBuf[i] != newID[i]) {
-                      match = false;
-                      break;
-                    }
-                  }
-
-                  if (match) {
-                    Serial.println(F("RF:VERIFY_OK"));
-                    res = true;
-                  } else {
-                    Serial.println(F("RF:VERIFY_FAIL"));
-                    res = false;
-                  }
+              status = rfid.MIFARE_Read(0, verifyBuf, &verifySize);
+              if (status == MFRC522::STATUS_OK) {
+                bool match = (verifyBuf[0] == newID[0] && verifyBuf[1] == newID[1] &&
+                              verifyBuf[2] == newID[2] && verifyBuf[3] == newID[3]);
+                if (match) {
+                  Serial.println(F("RF:VERIFY_OK"));
+                  res = true;
                 } else {
-                  Serial.print(F("RF:VERIFY_FAIL:"));
-                  Serial.println(status);
+                  Serial.println(F("RF:VERIFY_FAIL"));
                   res = false;
                 }
+              } else {
+                Serial.print(F("RF:VERIFY_FAIL:"));
+                Serial.println(status);
+                res = false;
               }
+            }
             }
           }
 
