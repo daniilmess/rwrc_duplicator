@@ -65,9 +65,7 @@ enum Mode {
   READ_RESULT,
   SAVED_DETAIL,
   CONFIRM_DELETE,
-  WRITE,
-  DIAGNOSTICS,
-  DIAG_RF_ERASE
+  WRITE
 };
 Mode mode = MAIN;
 
@@ -182,43 +180,6 @@ bool rw1990_read_and_display(uint8_t* buf, bool clearAndDraw) {
   }
   
   display.display();
-  return true;
-}
-
-// Unified function: read RF card and display UID
-// Parameters:
-//   buf: Buffer to store UID (up to RW1990_UID_SIZE bytes)
-//   uidLen: Output parameter - actual UID length read from card
-//   clearAndDraw: true to clear screen and draw header, false to add to existing display
-// Returns:
-//   true if card is found and displayed
-//   false if no card is present
-// Display: Shows UID at line 14
-bool rfid_read_and_display(uint8_t* buf, uint8_t* uidLen, bool clearAndDraw) {
-  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
-    return false;  // No card found
-  }
-  
-  *uidLen = min(rfid.uid.size, (uint8_t)RW1990_UID_SIZE);
-  memcpy(buf, rfid.uid.uidByte, *uidLen);
-  rfid.PICC_HaltA();
-  
-  // Card found - display it
-  if (clearAndDraw) {
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 0);
-    display.println(F("RF 13.56 MHz"));
-    display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
-  }
-  
-  display.setCursor(0, 14);
-  formatUID(TYPE_RFID_13M, buf, *uidLen);
-  display.display();
-  
-  okBeep();
-  
   return true;
 }
 
@@ -337,30 +298,11 @@ void rw1990_write_byte(uint8_t data) {
   }
 }
 
-// Authenticate a MIFARE sector using Key A with the given key.
-// sector: 0-15 for MIFARE Classic 1K.
-// Returns true on success, false on failure with Serial diagnostic.
-bool mifare_auth_sector(byte sector, MFRC522::MIFARE_Key* key) {
-  byte blockAddr = sector * 4;
-  MFRC522::StatusCode status = rfid.PCD_Authenticate(
-    MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, key, &(rfid.uid));
-  if (status != MFRC522::STATUS_OK) {
-    Serial.print(F("AUTH:FAIL s="));
-    Serial.println(sector);
-    return false;
-  }
-  return true;
-}
-
-// Write data to MIFARE block 4 (sector 1, first data block) using default key.
-// Selects the card, authenticates sector 1, writes 16 bytes, verifies by read-back.
+// Write UID to MIFARE blocks 0, 1, 2 (sector 0 UID blocks) using default key.
+// Card must already be selected (rfid.uid valid). Authenticates sector 0,
+// writes UID bytes and BCC, verifies by read-back of block 0.
 // Returns true on success.
 bool rfid_mifare_write(const uint8_t* data, uint8_t dataLen) {
-  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
-    Serial.println(F("RF:NODEV"));
-    return false;
-  }
-
   Serial.print(F("RF:WR UID:"));
   for (byte i = 0; i < rfid.uid.size; i++) {
     if (rfid.uid.uidByte[i] < 0x10) Serial.print('0');
@@ -372,29 +314,56 @@ bool rfid_mifare_write(const uint8_t* data, uint8_t dataLen) {
   MFRC522::MIFARE_Key key;
   for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
 
-  if (!mifare_auth_sector(1, &key)) {
+  // Authenticate sector 0 (blocks 0-2 contain the UID)
+  MFRC522::StatusCode authStatus = rfid.PCD_Authenticate(
+    MFRC522::PICC_CMD_MF_AUTH_KEY_A, 0, &key, &(rfid.uid));
+  if (authStatus != MFRC522::STATUS_OK) {
+    Serial.println(F("AUTH:FAIL"));
     rfid.PICC_HaltA();
     rfid.PCD_StopCrypto1();
     return false;
   }
 
-  byte writeData[16] = {0};
-  memcpy(writeData, data, min(dataLen, (uint8_t)16));
+  // Calculate BCC byte (XOR of UID bytes)
+  uint8_t bcc = 0;
+  for (byte i = 0; i < dataLen; i++) bcc ^= data[i];
 
-  MFRC522::StatusCode status = rfid.MIFARE_Write(4, writeData, 16);
-  if (status != MFRC522::STATUS_OK) {
-    Serial.println(F("RF:WR:FAIL"));
+  // Write block 0: UID bytes 0-3
+  byte writeBlock0[16] = {0};
+  memcpy(writeBlock0, data, min(dataLen, (uint8_t)4));
+  if (rfid.MIFARE_Write(0, writeBlock0, 16) != MFRC522::STATUS_OK) {
     rfid.PICC_HaltA();
     rfid.PCD_StopCrypto1();
     return false;
   }
 
-  // Read back to verify
+  // Write block 1: UID bytes 4-6 + BCC byte
+  byte writeBlock1[16] = {0};
+  if (dataLen > 4) {
+    memcpy(writeBlock1, data + 4, min((uint8_t)(dataLen - 4), (uint8_t)3));
+  }
+  writeBlock1[3] = bcc;
+  if (rfid.MIFARE_Write(1, writeBlock1, 16) != MFRC522::STATUS_OK) {
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return false;
+  }
+
+  // Write block 2: cascade tag byte
+  byte writeBlock2[16] = {0};
+  writeBlock2[0] = 0x88;
+  if (rfid.MIFARE_Write(2, writeBlock2, 16) != MFRC522::STATUS_OK) {
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return false;
+  }
+
+  // Read back block 0 for verification
   byte readBuf[18];
   byte readLen = sizeof(readBuf);
-  status = rfid.MIFARE_Read(4, readBuf, &readLen);
-  bool success = (status == MFRC522::STATUS_OK) &&
-                 (memcmp(readBuf, writeData, 16) == 0);
+  MFRC522::StatusCode readStatus = rfid.MIFARE_Read(0, readBuf, &readLen);
+  bool success = (readStatus == MFRC522::STATUS_OK) &&
+                 (memcmp(readBuf, writeBlock0, min(dataLen, (uint8_t)4)) == 0);
   Serial.println(success ? F("RF:VRF:OK") : F("RF:VRF:FAIL"));
 
   rfid.PICC_HaltA();
@@ -521,13 +490,6 @@ void drawHeader(const char* txt) {
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 }
 
-void diagHeader(const __FlashStringHelper* title) {
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.println(title);
-  display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
-}
 
 
 
@@ -537,29 +499,7 @@ void drawMain() {
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(4, 2); display.println(cursor == 0 ? "> Read Key" : "  Read Key");
   display.setCursor(4, 10); display.println(cursor == 1 ? "> Keys"  : "  Keys");
-  display.setCursor(4, 18); display.println(cursor == 2 ? "> Diag" : "  Diag");
   display.display();
-}
-
-void drawDiagnostics() {
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.println(F("DIAG"));
-  display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
-  
-  display.setCursor(4, 12);
-  display.print(cursor == 0 ? "> RF Erase" : "  RF Erase");
-  
-  display.display();
-}
-
-void returnToDiagnostics(uint8_t cursorPos) {
-  mode = DIAGNOSTICS;
-  cursor = cursorPos;
-  drawDiagnostics();
-  busy = false;
 }
 
 void drawList() {
@@ -743,7 +683,7 @@ void loop() {
 
     case MAIN:
       if (enc.turn()) {
-        cursor = (cursor + enc.dir() + 3) % 3;
+        cursor = (cursor + enc.dir() + 2) % 2;
         drawMain();
       }
       if (enc.click()) {
@@ -760,11 +700,6 @@ void loop() {
           selKey = 0; 
           drawList(); 
         }
-        if (cursor == 2) {
-          mode = DIAGNOSTICS;
-          cursor = 0;
-          drawDiagnostics();
-        }
       }
       break;
 
@@ -773,7 +708,7 @@ void loop() {
       if (enc.pressing()) {
         if (scanHoldStartMs == 0) {
           scanHoldStartMs = millis();
-        } else if (millis() - scanHoldStartMs >= 2000UL) {
+        } else if (millis() - scanHoldStartMs >= 1500UL) {
           mode = MAIN; 
           drawMain(); 
           busy = false; 
@@ -813,7 +748,26 @@ void loop() {
       }
 
       // If no RW1990, try RF card
-      if (rfid_read_and_display(tempBuf, &tempUidLen, true)) {
+      if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+        tempUidLen = min(rfid.uid.size, (uint8_t)RW1990_UID_SIZE);
+        memcpy(tempBuf, rfid.uid.uidByte, tempUidLen);
+        rfid.PICC_HaltA();
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(0, 0);
+        display.println(F("RF 13.56 MHz"));
+        display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+        display.setCursor(0, 14);
+        formatUID(TYPE_RFID_13M, tempBuf, tempUidLen);
+        display.display();
+        okBeep();
+        Serial.print(F("RF:UID:"));
+        for (byte i = 0; i < tempUidLen; i++) {
+          if (tempBuf[i] < 0x10) Serial.print('0');
+          Serial.print(tempBuf[i], HEX);
+        }
+        Serial.println();
         tempTp = TYPE_RFID_13M;
         
         tmStart = millis();
@@ -977,7 +931,9 @@ void loop() {
             }
           }
         } else {
-          devicePresent = rfid.PICC_IsNewCardPresent();
+          if (rfid.PICC_IsNewCardPresent()) {
+            devicePresent = rfid.PICC_ReadCardSerial();
+          }
         }
         
         if (!devicePresent) {
@@ -1024,7 +980,7 @@ void loop() {
           display.display();
         }
       } else {
-        // For MIFARE RF cards: authenticate sector 1, write data, verify
+        // For MIFARE RF cards: authenticate sector 0, write UID blocks, verify
         res = rfid_mifare_write(newID, tempUidLen);
 
         display.clearDisplay();
@@ -1044,123 +1000,6 @@ void loop() {
       delay(1800);
 
       mode = LIST; drawList(); busy = false;
-      break;
-    }
-
-    case DIAGNOSTICS: {
-      if (enc.click()) {
-        mode = DIAG_RF_ERASE;
-        tmStart = millis();
-        busy = true;
-      }
-      if (enc.hold()) {
-        mode = MAIN;
-        cursor = 0;
-        drawMain();
-      }
-      break;
-    }
-
-    case DIAG_RF_ERASE: {
-      diagHeader(F("RF Erase"));
-      display.setCursor(0, 14);
-      display.println(F("Place card..."));
-      display.display();
-      
-      unsigned long startWait = millis();
-      bool cardPresent = false;
-      while (millis() - startWait < 5000UL) {
-        if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
-          cardPresent = true;
-          break;
-        }
-        delay(100);
-      }
-      
-      if (!cardPresent) {
-        diagHeader(F("RF Erase"));
-        display.setCursor(0, 16);
-        display.println(F("Timeout"));
-        display.display();
-        errBeep();
-        delay(2000);
-        returnToDiagnostics(0);
-        break;
-      }
-      
-      diagHeader(F("RF Erase"));
-      display.setCursor(0, 14);
-      display.println(F("Erase..."));
-      display.display();
-      
-      delay(500);
-      
-      bool success = true;
-      MFRC522::StatusCode status;
-      byte zeros[16] = {0};
-      
-      MFRC522::MIFARE_Key key;
-      for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
-      
-      for (byte sector = 1; sector <= 15 && success; sector++) {
-        byte firstBlock = sector * 4;
-
-        // Update display with sector progress
-        diagHeader(F("RF Erase"));
-        display.setCursor(0, 14);
-        display.print(F("Sector "));
-        display.println(sector);
-        display.display();
-
-        // Authenticate this sector (authentication scope is per-sector)
-        status = rfid.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, firstBlock, &key, &(rfid.uid));
-        if (status != MFRC522::STATUS_OK) {
-          Serial.print(F("AUTH:FAIL s="));
-          Serial.println(sector);
-          success = false;
-          break;
-        }
-
-        // Erase all 3 data blocks in this sector (skip sector trailer at firstBlock+3).
-        // Sector 0 is intentionally skipped (contains manufacturer/UID data).
-        for (byte b = 0; b < 3 && success; b++) {
-          status = rfid.MIFARE_Write(firstBlock + b, zeros, 16);
-          if (status != MFRC522::STATUS_OK) {
-            Serial.print(F("WR:FAIL b="));
-            Serial.println(firstBlock + b);
-            success = false;
-          }
-        }
-      }
-      
-      rfid.PICC_HaltA();
-      rfid.PCD_StopCrypto1();
-      
-      // After erasing, read and display card state
-      delay(200);
-      diagHeader(F("RF Erase"));
-      display.setCursor(0, 14);
-      
-      if (success) {
-        display.println(F("OK!"));
-        
-        // Try to read the card again to show final state
-        uint8_t cardBuf[RW1990_UID_SIZE];
-        uint8_t cardLen = 0;
-        if (rfid_read_and_display(cardBuf, &cardLen, false)) {
-          display.setCursor(0, 22);
-          display.print(F("Card present"));
-        }
-        okBeep();
-      } else {
-        display.println(F("Protect?"));
-        errBeep();
-      }
-      
-      display.display();
-      delay(2000);
-      
-      returnToDiagnostics(0);
       break;
     }
   }
