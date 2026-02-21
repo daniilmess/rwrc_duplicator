@@ -1037,6 +1037,31 @@ void loop() {
           } else {
             Serial.println(F("RF:AUTH_OK"));
 
+            // MAGIC COMMAND 0x40 - unlock for magic card
+            Serial.println(F("RF:MAGIC_0x40"));
+            byte magicBuf[1] = {0x40};
+            byte magicSize = 1;
+            byte validBits = 0;
+            MFRC522::StatusCode magicStatus;
+            magicStatus = rfid.PCD_TransceiveData(magicBuf, 1, magicBuf, &magicSize, &validBits, true);
+            if (magicStatus != MFRC522::STATUS_OK) {
+              Serial.print(F("RF:MAGIC_0x40_STATUS:"));
+              Serial.println(magicStatus);
+            }
+            delayMicroseconds(100);
+
+            // MAGIC COMMAND 0x43 - enable write mode
+            Serial.println(F("RF:MAGIC_0x43"));
+            magicBuf[0] = 0x43;
+            magicSize = 1;
+            validBits = 0;
+            magicStatus = rfid.PCD_TransceiveData(magicBuf, 1, magicBuf, &magicSize, &validBits, true);
+            if (magicStatus != MFRC522::STATUS_OK) {
+              Serial.print(F("RF:MAGIC_0x43_STATUS:"));
+              Serial.println(magicStatus);
+            }
+            delayMicroseconds(100);
+
             // Read block 0
             Serial.println(F("RF:READ"));
             status = rfid.MIFARE_Read(block, buffer, &size);
