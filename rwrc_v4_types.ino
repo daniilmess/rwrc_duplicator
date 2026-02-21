@@ -1001,95 +1001,47 @@ void loop() {
           showErrorMessage(F("CHK:FAIL"));
         }
       } else {
-        // For MIFARE RF cards: authenticate sector 0, write UID blocks, verify
+        // TYPE_13: MIFARE card - use MIFARE_SetUid for Magic MIFARE
         if (tempTp == TYPE_13) {
-          byte buffer[16];
-          byte size = 16;
-          MFRC522::StatusCode status;
+          Serial.println(F("WRITE_MIFARE_START"));
 
-          // Read current block 0
-          status = rfid.MIFARE_Read(0, buffer, &size);
-
-          if (status != MFRC522::STATUS_OK) {
-            Serial.print(F("RF:READ_FAIL:"));
-            Serial.println(status);
-            res = false;
-          } else {
-
-            // Modify UID bytes (first 4 bytes)
-            for (byte i = 0; i < 4; i++) {
-              buffer[i] = newID[i];
-            }
-
-            // STOP CRYPTO before opening backdoor
-            rfid.PCD_StopCrypto1();
-
-            // OPEN BACKDOOR for magic card using library function
-            if (!rfid.MIFARE_OpenUidBackdoor(true)) {  // true = log errors
-              Serial.println(F("RF:BACKDOOR_FAIL"));
-              res = false;
-            } else {
-
-            // WRITE block 0
-            status = rfid.MIFARE_Write(0, buffer, 16);
-
-            if (status != MFRC522::STATUS_OK) {
-              Serial.print(F("RF:WRITE_FAIL:"));
-              Serial.println(status);
-              res = false;
-            } else {
-
-              // Wake up card for verification
-              byte atqa_answer[2];
-              byte atqa_size = sizeof(atqa_answer);
-              rfid.PICC_WakeupA(atqa_answer, &atqa_size);
-
-              delay(50);
-
-              // Read block 0 to verify
-              byte verifyBuf[16];
-              byte verifySize = 16;
-
-              status = rfid.MIFARE_Read(0, verifyBuf, &verifySize);
-              if (status == MFRC522::STATUS_OK) {
-                bool match = (verifyBuf[0] == newID[0] && verifyBuf[1] == newID[1] &&
-                              verifyBuf[2] == newID[2] && verifyBuf[3] == newID[3]);
-                if (match) {
-                  res = true;
-                } else {
-                  Serial.println(F("RF:VERIFY_FAIL"));
-                  res = false;
-                }
-              } else {
-                Serial.print(F("RF:VERIFY_FAIL:"));
-                Serial.println(status);
-                res = false;
-              }
-            }
-            }
+          bool check = false;
+          for (byte i = 0; i < rfid.uid.size; i++) {
+            oldID[i] = rfid.uid.uidByte[i];
+            if (oldID[i] != newID[i]) { check = true; break; }
           }
 
+          if (check) {
+            // UID differs - write new UID
+            if (rfid.MIFARE_SetUid(newID, (byte)4, true)) {
+              Serial.println(F("WRITE_MIFARE_OK"));
+              okBeep();
+              res = true;
+            } else {
+              Serial.println(F("WRITE_MIFARE_FAIL"));
+              errBeep();
+              res = false;
+            }
+          } else {
+            // UID is the same - no write needed
+            Serial.println(F("WRITE_MIFARE_SAME"));
+            errBeep();
+            res = false;
+          }
+
+          rfid.PICC_HaltA();
           rfid.PCD_StopCrypto1();
 
+          display.clearDisplay();
+          display.setCursor(0, 8);
           if (res) {
-            Serial.println(F("WRITE_RF13_RESULT:OK"));
+            display.println(F("13 OK"));
+            display.println(F("WR:PASS"));
           } else {
-            Serial.println(F("WRITE_RF13_RESULT:FAIL"));
+            display.println(F("WR:FAIL"));
           }
+          display.display();
         }
-
-        display.clearDisplay();
-        display.setCursor(0, 8);
-        if (res) {
-          okBeep();
-          if (tempTp == TYPE_13) display.println(F("13 OK"));
-          else if (tempTp == TYPE_125) display.println(F("125 OK"));
-          display.println(F("WR:PASS"));
-        } else {
-          errBeep();
-          display.println(F("WR:FAIL"));
-        }
-        display.display();
       }
       
       delay(1800);
