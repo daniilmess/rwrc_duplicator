@@ -363,8 +363,8 @@ bool mifare_auth_sector(byte sector, MFRC522::MIFARE_Key* key) {
   return true;
 }
 
-// Write data to MIFARE block 4 (sector 1, first data block) using default key.
-// Selects the card, authenticates sector 1, writes 16 bytes, verifies by read-back.
+// Write UID to MIFARE blocks 0, 1, 2 (sector 0 UID blocks) using default key.
+// Authenticates sector 0, writes UID bytes and BCC, verifies by read-back.
 // Returns true on success.
 bool rfid_mifare_write(const uint8_t* data, uint8_t dataLen) {
   Serial.println(F("DEBUG:rfid_mifare_write START"));
@@ -395,10 +395,10 @@ bool rfid_mifare_write(const uint8_t* data, uint8_t dataLen) {
   MFRC522::MIFARE_Key key;
   for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
 
+  // Authenticate sector 0 (blocks 0-2 contain the UID)
   Serial.println(F("RF:AUTH_ATTEMPT"));
-  byte blockAddr = 4; // sector 1, first data block
   MFRC522::StatusCode authStatus = rfid.PCD_Authenticate(
-    MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, &key, &(rfid.uid));
+    MFRC522::PICC_CMD_MF_AUTH_KEY_A, 0, &key, &(rfid.uid));
   Serial.print(F("RF:AUTH_STATUS:"));
   Serial.println((int)authStatus);
   if (authStatus != MFRC522::STATUS_OK) {
@@ -408,24 +408,57 @@ bool rfid_mifare_write(const uint8_t* data, uint8_t dataLen) {
   }
   Serial.println(F("RF:AUTH_OK"));
 
-  byte writeData[16] = {0};
-  memcpy(writeData, data, min(dataLen, (uint8_t)16));
+  // Calculate BCC byte (XOR of UID bytes)
+  uint8_t bcc = 0;
+  for (byte i = 0; i < dataLen; i++) bcc ^= data[i];
 
-  Serial.print(F("RF:WRITE_BLOCK:4 LEN:"));
-  Serial.println(dataLen);
-  MFRC522::StatusCode writeStatus = rfid.MIFARE_Write(4, writeData, 16);
-  Serial.print(F("RF:WRITE_STATUS:"));
-  Serial.println((int)writeStatus);
-  if (writeStatus != MFRC522::STATUS_OK) {
+  // Write block 0: UID bytes 0-3 (first 4 bytes of new UID)
+  byte writeBlock0[16] = {0};
+  memcpy(writeBlock0, data, min(dataLen, (uint8_t)4));
+  Serial.println(F("RF:WRITE_BLOCK:0"));
+  MFRC522::StatusCode ws0 = rfid.MIFARE_Write(0, writeBlock0, 16);
+  Serial.print(F("RF:WRITE_STATUS_0:"));
+  Serial.println((int)ws0);
+  if (ws0 != MFRC522::STATUS_OK) {
     rfid.PICC_HaltA();
     rfid.PCD_StopCrypto1();
     return false;
   }
 
+  // Write block 1: UID bytes 4-6 + BCC byte
+  byte writeBlock1[16] = {0};
+  if (dataLen > 4) {
+    memcpy(writeBlock1, data + 4, min((uint8_t)(dataLen - 4), (uint8_t)3));
+  }
+  writeBlock1[3] = bcc;
+  Serial.println(F("RF:WRITE_BLOCK:1"));
+  MFRC522::StatusCode ws1 = rfid.MIFARE_Write(1, writeBlock1, 16);
+  Serial.print(F("RF:WRITE_STATUS_1:"));
+  Serial.println((int)ws1);
+  if (ws1 != MFRC522::STATUS_OK) {
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return false;
+  }
+
+  // Write block 2: manufacturer data (byte 0 is cascade tag 0x88 for 7-byte UID cards)
+  byte writeBlock2[16] = {0};
+  writeBlock2[0] = 0x88; // cascade tag byte (standard manufacturer block value)
+  Serial.println(F("RF:WRITE_BLOCK:2"));
+  MFRC522::StatusCode ws2 = rfid.MIFARE_Write(2, writeBlock2, 16);
+  Serial.print(F("RF:WRITE_STATUS_2:"));
+  Serial.println((int)ws2);
+  if (ws2 != MFRC522::STATUS_OK) {
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return false;
+  }
+
+  // Read back block 0 for verification
   Serial.println(F("RF:READ_ATTEMPT"));
   byte readBuf[18];
   byte readLen = sizeof(readBuf);
-  MFRC522::StatusCode readStatus = rfid.MIFARE_Read(4, readBuf, &readLen);
+  MFRC522::StatusCode readStatus = rfid.MIFARE_Read(0, readBuf, &readLen);
   Serial.print(F("RF:READ_STATUS:"));
   Serial.println((int)readStatus);
   if (readStatus != MFRC522::STATUS_OK) {
@@ -442,7 +475,7 @@ bool rfid_mifare_write(const uint8_t* data, uint8_t dataLen) {
   }
   Serial.println();
 
-  bool match = (memcmp(readBuf, writeData, 16) == 0);
+  bool match = (memcmp(readBuf, writeBlock0, min(dataLen, (uint8_t)4)) == 0);
   Serial.println(match ? F("CMP:OK") : F("CMP:FAIL"));
 
   rfid.PICC_HaltA();
@@ -805,7 +838,7 @@ void loop() {
       if (enc.pressing()) {
         if (scanHoldStartMs == 0) {
           scanHoldStartMs = millis();
-        } else if (millis() - scanHoldStartMs >= 2000UL) {
+        } else if (millis() - scanHoldStartMs >= 1500UL) {
           mode = MAIN; 
           drawMain(); 
           busy = false; 
@@ -866,6 +899,14 @@ void loop() {
         formatUID(TYPE_13, tempBuf, tempUidLen);
         display.display();
         okBeep();
+        Serial.print(F("RF:UID:"));
+        for (byte i = 0; i < tempUidLen; i++) {
+          if (tempBuf[i] < 0x10) Serial.print('0');
+          Serial.print(tempBuf[i], HEX);
+        }
+        Serial.println();
+        Serial.print(F("RF:CHIP:"));
+        Serial.println(tempRfidChip);
         tempTp = TYPE_13;
         tempOwChip = OW_UNKNOWN;
         
@@ -1116,7 +1157,7 @@ void loop() {
           display.display();
         }
       } else {
-        // For MIFARE RF cards: authenticate sector 1, write data, verify
+        // For MIFARE RF cards: authenticate sector 0, write UID blocks, verify
         if (tempTp == TYPE_13) {
           Serial.println(F("WRITE_RF13_START"));
         }
