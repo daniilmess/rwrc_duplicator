@@ -468,16 +468,37 @@ void factoryReset() {
   asm volatile ("jmp 0");
 }
 
-void drawKeyInfo(const char* txt) {
+void displayTemplate(const __FlashStringHelper* title) {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
-  display.println(txt);
+  display.println(title);
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 }
 
-void drawChipInfo(const __FlashStringHelper* prefix, uint8_t chip, bool isOneWire) {
+void displayMenuChoice(const __FlashStringHelper* title,
+                       const __FlashStringHelper* option1,
+                       const __FlashStringHelper* option2,
+                       bool selectedFirst) {
+  displayTemplate(title);
+  display.setCursor(4, 14);
+  if (selectedFirst) {
+    display.print(F("["));
+    display.print(option1);
+    display.print(F("] "));
+    display.print(option2);
+  } else {
+    display.print(F(" "));
+    display.print(option1);
+    display.print(F(" ["));
+    display.print(option2);
+    display.print(F("]"));
+  }
+  display.display();
+}
+
+void displayChipInfo(const __FlashStringHelper* prefix, uint8_t chip, bool isOneWire) {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
@@ -494,16 +515,16 @@ void drawChipInfo(const __FlashStringHelper* prefix, uint8_t chip, bool isOneWir
 
 
 void drawMain() {
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(4, 2); display.println(cursor == 0 ? "> Read Key" : "  Read Key");
-  display.setCursor(4, 10); display.println(cursor == 1 ? "> Keys"  : "  Keys");
+  displayTemplate(F("Menu"));
+  display.setCursor(4, 14);
+  display.println(cursor == 0 ? F("> Read Key") : F("  Read Key"));
+  display.setCursor(4, 22);
+  display.println(cursor == 1 ? F("> Keys") : F("  Keys"));
   display.display();
 }
 
 void drawList() {
-  drawKeyInfo("Keys");
+  displayTemplate(F("Keys"));
   int start = max(0, selKey - 1);
   for (int i = 0; i < 3; i++) {
     int idx = start + i;
@@ -525,32 +546,22 @@ void drawList() {
 }
 
 void drawSavedKeyDetail() {
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  if (keys[selKey].type == TYPE_RW)       display.println(F("RW Key"));
-  else if (keys[selKey].type == TYPE_13)  display.println(F("13 MHz Key"));
-  else                                    display.println(F("125 kHz Key"));
-  display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  const __FlashStringHelper* typeStr;
+  if (keys[selKey].type == TYPE_RW) typeStr = F("RW Key");
+  else if (keys[selKey].type == TYPE_13) typeStr = F("13 MHz Key");
+  else typeStr = F("125 kHz Key");
+
+  displayTemplate(typeStr);
   display.setCursor(0, 12);
   formatUID(keys[selKey].type, keys[selKey].uid, keys[selKey].uidLen);
-  
   display.setCursor(0, 24);
-  if (cursor == 0) {
-    display.print(F("> Write  Delete"));
-  } else {
-    display.print(F("  Write [Delete]"));
-  }
+  display.print(cursor == 0 ? F("> Write  Delete") : F("  Write [Delete]"));
   display.display();
 }
 
 
 void drawConfirmDelete() {
-  drawKeyInfo("Delete key?");
-  display.setCursor(4, 14);
-  display.println(deleteConfirm ? "> YES   NO" : "  YES > NO");
-  display.display();
+  displayMenuChoice(F("Delete key?"), F("Yes"), F("No"), deleteConfirm);
 }
 
 void showScanning(const __FlashStringHelper* msg) {
@@ -724,7 +735,7 @@ void loop() {
       // Try to read RW1990 first
       if (rw1990_read(tempBuf, true)) {
         tempOwChip = detectOneWireChip(tempBuf);
-        drawChipInfo(F("RW: "), tempOwChip, true);
+        displayChipInfo(F("RW: "), tempOwChip, true);
         display.setCursor(0, 14);
         formatUID(TYPE_RW, tempBuf, RW1990_UID_SIZE);
         display.setCursor(0, 24);
@@ -749,7 +760,7 @@ void loop() {
         memcpy(tempBuf, rfid.uid.uidByte, tempUidLen);
         tempRfidChip = detectRFIDChip();
         rfid.PICC_HaltA();
-        drawChipInfo(F("RF 13.56: "), tempRfidChip, false);
+        displayChipInfo(F("RF 13.56: "), tempRfidChip, false);
         display.setCursor(0, 14);
         display.println(F("UID:"));
         formatUID(TYPE_13, tempBuf, tempUidLen);
@@ -883,9 +894,9 @@ void loop() {
       {
         uint8_t chipType = (tempTp == TYPE_RW) ? keys[selKey].owChip : keys[selKey].rfidChip;
         if (tempTp == TYPE_RW) {
-          drawChipInfo(F("WR: "), chipType, true);
+          displayChipInfo(F("WR: "), chipType, true);
         } else {
-          drawChipInfo(F("WR RF: "), chipType, false);
+          displayChipInfo(F("WR RF: "), chipType, false);
         }
         display.setCursor(0, 14);
         formatUID(tempTp, newID, tempUidLen);
@@ -974,7 +985,7 @@ void loop() {
         uint8_t readBuf[RW1990_UID_SIZE];
         if (rw1990_read(readBuf)) {
           uint8_t rchip = detectOneWireChip(readBuf);
-          drawChipInfo(F("RW: "), rchip, true);
+          displayChipInfo(F("RW: "), rchip, true);
           display.setCursor(0, 14);
           formatUID(TYPE_RW, readBuf, RW1990_UID_SIZE);
           display.setCursor(0, 24);
