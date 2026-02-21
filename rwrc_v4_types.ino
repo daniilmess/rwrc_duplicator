@@ -173,8 +173,9 @@ uint8_t detectOneWireChip(const uint8_t* uid) {
 
 // Identify the RFID chip using the SAK byte already held in rfid.uid.
 // Must be called before rfid.PICC_HaltA().
-// Note: ISO 14443-4 cards with 7-byte UIDs are assumed DESFire; with shorter
-// UIDs they are heuristically classified as HID. EM4100 is 125 kHz and will
+// Note: ISO 14443-4 cards with 7-byte UIDs are assumed DESFire; with 4-byte
+// UIDs they are treated as Magic MIFARE (can use MIFARE commands); with other
+// sizes they are heuristically classified as HID. EM4100 is 125 kHz and will
 // not be detected here (MFRC522 reads 13.56 MHz only).
 uint8_t detectRFIDChip() {
   MFRC522::PICC_Type piccType = rfid.PICC_GetType(rfid.uid.sak);
@@ -185,6 +186,7 @@ uint8_t detectRFIDChip() {
     case MFRC522::PICC_TYPE_MIFARE_UL:   return RFID_MIFARE;
     case MFRC522::PICC_TYPE_MIFARE_DESFIRE: return RFID_DESFIRE;
     case MFRC522::PICC_TYPE_ISO_14443_4:
+      if (rfid.uid.size == 4) return RFID_MIFARE;  // Magic MIFARE Zero (4-byte UID)
       return (rfid.uid.size == 7) ? RFID_DESFIRE : RFID_HID;
     default:
       return RFID_UNKNOWN;
