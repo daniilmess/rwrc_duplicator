@@ -114,12 +114,12 @@ const char* rw1990_check_errors(const uint8_t* buf) {
 //   true if key is found (regardless of Family/CRC errors)
 //   false if no key is present
 // Note: Always outputs diagnostic info to Serial including error status
-bool rw1990_read(uint8_t* buf) {
+bool rw1990_read(uint8_t* buf, bool silent = false) {
   ow.reset_search();
   bool found = ow.search(buf);
   
   if (!found) {
-    Serial.println(F("RW:NODEV"));
+    if (!silent) Serial.println(F("RW:NODEV"));
     return false;
   }
   
@@ -147,8 +147,8 @@ bool rw1990_read(uint8_t* buf) {
 //   true if key is found and displayed
 //   false if no key is present
 // Display: Shows UID at line 14, error status at line 24
-bool rw1990_read_and_display(uint8_t* buf, bool clearAndDraw) {
-  if (!rw1990_read(buf)) {
+bool rw1990_read_and_display(uint8_t* buf, bool clearAndDraw, bool silent = false) {
+  if (!rw1990_read(buf, silent)) {
     return false;  // No key found
   }
   
@@ -689,6 +689,7 @@ void loop() {
       if (enc.click()) {
         if (cursor == 0) { 
           mode = READ_KEY; 
+          Serial.println(F("READ_MODE"));
           tmStart = millis(); 
           lastTickMs = millis();
           inScanMode = true;
@@ -736,7 +737,7 @@ void loop() {
       }
 
       // Try to read RW1990 first
-      if (rw1990_read_and_display(tempBuf, true)) {
+      if (rw1990_read_and_display(tempBuf, true, true)) {
         tempTp = TYPE_RW1990;
         tempUidLen = RW1990_UID_SIZE;
         
@@ -836,6 +837,7 @@ void loop() {
           tempUidLen = keys[selKey].uidLen;
           memcpy(newID, keys[selKey].uid, RW1990_UID_SIZE);
           mode = WRITE;
+          Serial.println(F("WRITE_MODE"));
           tmStart = millis();
           lastBeepMs = 0;  // Reset beep tracking
           busy = true;
