@@ -363,18 +363,20 @@ bool mifare_auth_sector(byte sector, MFRC522::MIFARE_Key* key) {
   return true;
 }
 
-// Write UID to MIFARE block 4 (sector 1 data block) using default key.
-// Card must already be selected (rfid.uid valid). Authenticates sector 1,
-// writes UID bytes to block 4, verifies by read-back of block 4.
+// Write UID to MIFARE block 0 (manufacturer/UID block) using default key.
+// Card must already be selected (rfid.uid valid). Authenticates block 0,
+// reads current block 0, modifies the UID bytes (first 4), recalculates BCC
+// (byte 4 = XOR of bytes 0-3), writes block 0 back, and verifies.
+// Supports Chinese UID-changeable MIFARE Classic 1K cards.
 // Returns true on success.
 bool rfid_mifare_write(const uint8_t* data, uint8_t dataLen) {
   MFRC522::MIFARE_Key key;
   for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
 
-  // Authenticate sector 1 (block 4 is the first data block of sector 1)
-  Serial.println(F("RF:AUTH_ATTEMPT"));
+  // Step 1: Authenticate with block 0
+  Serial.println(F("RF:AUTH_BLOCK_0"));
   MFRC522::StatusCode status = rfid.PCD_Authenticate(
-    MFRC522::PICC_CMD_MF_AUTH_KEY_A, 4, &key, &(rfid.uid));
+    MFRC522::PICC_CMD_MF_AUTH_KEY_A, 0, &key, &(rfid.uid));
   if (status != MFRC522::STATUS_OK) {
     Serial.print(F("RF:AUTH_FAIL:"));
     Serial.println((int)status);
@@ -384,31 +386,64 @@ bool rfid_mifare_write(const uint8_t* data, uint8_t dataLen) {
   }
   Serial.println(F("RF:AUTH_OK"));
 
-  // Write block 4: UID bytes + zeros
-  byte dataBlock[16] = {0};
-  memcpy(dataBlock, data, min(dataLen, (uint8_t)4));
-  Serial.println(F("RF:WRITE_BLOCK_4"));
-  status = rfid.MIFARE_Write(4, dataBlock, 16);
+  // Step 2: Read current block 0
+  Serial.println(F("RF:READ_BLOCK_0"));
+  byte buffer[18];
+  byte size = sizeof(buffer);
+  status = rfid.MIFARE_Read(0, buffer, &size);
   if (status != MFRC522::STATUS_OK) {
-    Serial.print(F("RF:WRITE_FAIL_4:"));
+    Serial.print(F("RF:READ_FAIL:"));
     Serial.println((int)status);
     rfid.PICC_HaltA();
     rfid.PCD_StopCrypto1();
     return false;
   }
-  Serial.println(F("RF:WRITE_OK_4"));
+  Serial.println(F("RF:READ_OK"));
 
-  // Verify by reading back block 4
-  byte readBuf[18];
-  byte readLen = sizeof(readBuf);
-  MFRC522::StatusCode readStatus = rfid.MIFARE_Read(4, readBuf, &readLen);
+  // Step 3: Modify UID bytes (first 4 bytes)
+  Serial.println(F("RF:MODIFY_UID"));
+  for (byte i = 0; i < min(dataLen, (uint8_t)4); i++) {
+    buffer[i] = data[i];
+  }
+
+  // Step 4: Recalculate BCC (byte 4 = XOR of bytes 0-3)
+  buffer[4] = buffer[0] ^ buffer[1] ^ buffer[2] ^ buffer[3];
+  Serial.print(F("RF:BCC_CALC:"));
+  Serial.println(buffer[4], HEX);
+
+  // Step 5: Write modified block 0 back
+  Serial.println(F("RF:WRITE_BLOCK_0"));
+  status = rfid.MIFARE_Write(0, buffer, 16);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("RF:WRITE_FAIL:"));
+    Serial.println((int)status);
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return false;
+  }
+  Serial.println(F("RF:WRITE_OK"));
+
+  // Step 6: Verify - read block 0 again and check UID
+  Serial.println(F("RF:VERIFY_BLOCK_0"));
+  byte verifyBuf[18];
+  byte verifySize = sizeof(verifyBuf);
   bool success = false;
-  if (readStatus == MFRC522::STATUS_OK) {
-    success = (memcmp(readBuf, data, min(dataLen, (uint8_t)4)) == 0);
-    Serial.println(success ? F("RF:VERIFY_OK") : F("RF:VERIFY_FAIL"));
+  MFRC522::StatusCode verifyStatus = rfid.MIFARE_Read(0, verifyBuf, &verifySize);
+  if (verifyStatus == MFRC522::STATUS_OK) {
+    success = (verifyBuf[0] == data[0] && verifyBuf[1] == data[1] &&
+               verifyBuf[2] == data[2] && verifyBuf[3] == data[3]);
+    if (success) {
+      Serial.println(F("RF:VERIFY_OK"));
+    } else {
+      Serial.print(F("RF:VERIFY_FAIL - Read: "));
+      Serial.print(verifyBuf[0], HEX); Serial.print(" ");
+      Serial.print(verifyBuf[1], HEX); Serial.print(" ");
+      Serial.print(verifyBuf[2], HEX); Serial.print(" ");
+      Serial.println(verifyBuf[3], HEX);
+    }
   } else {
-    Serial.print(F("RF:VERIFY_ERROR:"));
-    Serial.println((int)readStatus);
+    Serial.print(F("RF:VERIFY_READ_FAIL:"));
+    Serial.println((int)verifyStatus);
   }
 
   rfid.PICC_HaltA();
