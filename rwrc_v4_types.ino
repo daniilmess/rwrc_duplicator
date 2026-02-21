@@ -115,16 +115,6 @@ bool busy = false;
 bool inScanMode = false;
 
 
-#ifdef __AVR__
-// Returns available SRAM by measuring the gap between the stack pointer
-// and the top of the heap (or __heap_start if no heap allocation yet).
-// Used for diagnostics before OLED initialization.
-static int freeRam() {
-  extern int __heap_start, *__brkval;
-  int v;
-  return (int)&v - (__brkval == 0 ? (int)&__heap_start : (int)__brkval);
-}
-#endif
 
 void printOwChipNameToDisplay(uint8_t chip) {
   switch (chip) {
@@ -488,7 +478,7 @@ void loadEEPROM() {
     saveEEPROM();
     EEPROM.update(EEPROM_FIRST_BOOT_FLAG, 0x02);
   } else {
-    Serial.println(F("EEPROM:LOAD"));
+    Serial.println(F("EEPROM"));
     keyCnt = EEPROM.read(EEPROM_KEY_COUNT);
     if (keyCnt > MAX_KEYS) keyCnt = 0;
     
@@ -619,22 +609,7 @@ void drawList() {
     if (keys[idx].name[0] != '\0') {
       display.print(keys[idx].name);
     } else {
-      if (keys[idx].type == TYPE_RW) {
-        for (uint8_t j = 1; j < 7; j++) {
-          printHex(keys[idx].uid[j]);
-          if (j < 6 && j % 2 == 0) display.print(' ');
-        }
-      } else if (keys[idx].type == TYPE_13) {
-        for (uint8_t j = 0; j < keys[idx].uidLen && j < 4; j++) {
-          printHex(keys[idx].uid[j]);
-          if (j < keys[idx].uidLen - 1) display.print(' ');
-        }
-      } else {
-        for (uint8_t j = 0; j < keys[idx].uidLen && j < 5; j++) {
-          printHex(keys[idx].uid[j]);
-          if (j < keys[idx].uidLen - 1) display.print(' ');
-        }
-      }
+      formatUID(keys[idx].type, keys[idx].uid, keys[idx].uidLen);
     }
   }
   display.display();
@@ -650,24 +625,13 @@ void drawSavedKeyDetail() {
   else                                    display.println(F("125 kHz Key"));
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
   display.setCursor(0, 12);
-  
-  if (keys[selKey].type == TYPE_RW) {
-    for (uint8_t j = 1; j < 7; j++) {
-      printHex(keys[selKey].uid[j]);
-      if (j < 6 && j % 2 == 1) display.print(' ');
-    }
-  } else {
-    for (uint8_t j = 0; j < keys[selKey].uidLen && j < RW1990_UID_SIZE; j++) {
-      printHex(keys[selKey].uid[j]);
-      if (j < keys[selKey].uidLen - 1) display.print(' ');
-    }
-  }
+  formatUID(keys[selKey].type, keys[selKey].uid, keys[selKey].uidLen);
   
   display.setCursor(0, 24);
   if (cursor == 0) {
-    display.print("   > Write  Delete");
+    display.print(F("> Write  Delete"));
   } else {
-    display.print("    Write  [Delete]");
+    display.print(F("  Write [Delete]"));
   }
   display.display();
 }
@@ -685,7 +649,7 @@ void showScanning(const __FlashStringHelper* msg) {
   display.setTextSize(1);
   display.setCursor(0, 8);
   display.println(msg);
-  display.println(F("Hold 2s exit"));
+  display.println(F("2s exit"));
   display.display();
 }
 
@@ -730,18 +694,14 @@ void setup() {
   Serial.print(F("OLED:I2C:RC="));
   Serial.println(i2cRC);
   if (i2cRC != 0) {
-    Serial.println(F("OLED:I2C:NO_3C"));
+    Serial.println(F("OLED NO_3C"));
     fatalBlinkYellow();
   }
 
   {
     bool oledOk = false;
-#ifdef __AVR__
-    Serial.print(F("RAM:FREE="));
-    Serial.println(freeRam());
-#endif
     for (uint8_t attempt = 1; attempt <= 3 && !oledOk; attempt++) {
-      Serial.print(F("OLED:BEGIN:TRY "));
+      Serial.print(F("OLED TRY "));
       Serial.println(attempt);
       if (display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
         oledOk = true;
@@ -750,7 +710,7 @@ void setup() {
       }
     }
     if (!oledOk) {
-      Serial.println(F("OLED:BEGIN:FAIL"));
+      Serial.println(F("OLED FAIL"));
       fatalBlinkYellow();
     }
   }
@@ -1014,7 +974,7 @@ void loop() {
         display.setCursor(0, 14);
         formatUID(tempTp, newID, tempUidLen);
         display.setCursor(0, 24);
-        display.print(F("Place key..."));
+        display.print(F("Place key"));
         display.display();
       }
 
