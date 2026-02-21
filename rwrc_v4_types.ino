@@ -477,28 +477,17 @@ void drawKeyInfo(const char* txt) {
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 }
 
-void drawKeyInfoAndShow(const char* txt) {
-  drawKeyInfo(txt);
-  display.display();
-}
-
-void drawKeyInfoOwChip(const __FlashStringHelper* prefix, uint8_t chip) {
+void drawChipInfo(const __FlashStringHelper* prefix, uint8_t chip, bool isOneWire) {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
   display.print(prefix);
-  printOwChipNameToDisplay(chip);
-  display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
-}
-
-void drawKeyInfoRfidChip(const __FlashStringHelper* prefix, uint8_t chip) {
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.print(prefix);
-  printRfidChipNameToDisplay(chip);
+  if (isOneWire) {
+    printOwChipNameToDisplay(chip);
+  } else {
+    printRfidChipNameToDisplay(chip);
+  }
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 }
 
@@ -735,7 +724,7 @@ void loop() {
       // Try to read RW1990 first
       if (rw1990_read(tempBuf, true)) {
         tempOwChip = detectOneWireChip(tempBuf);
-        drawKeyInfoOwChip(F("RW: "), tempOwChip);
+        drawChipInfo(F("RW: "), tempOwChip, true);
         display.setCursor(0, 14);
         formatUID(TYPE_RW, tempBuf, RW1990_UID_SIZE);
         display.setCursor(0, 24);
@@ -760,7 +749,7 @@ void loop() {
         memcpy(tempBuf, rfid.uid.uidByte, tempUidLen);
         tempRfidChip = detectRFIDChip();
         rfid.PICC_HaltA();
-        drawKeyInfoRfidChip(F("RF 13.56: "), tempRfidChip);
+        drawChipInfo(F("RF 13.56: "), tempRfidChip, false);
         display.setCursor(0, 14);
         display.println(F("UID:"));
         formatUID(TYPE_13, tempBuf, tempUidLen);
@@ -894,9 +883,9 @@ void loop() {
       {
         uint8_t chipType = (tempTp == TYPE_RW) ? keys[selKey].owChip : keys[selKey].rfidChip;
         if (tempTp == TYPE_RW) {
-          drawKeyInfoOwChip(F("WR: "), chipType);
+          drawChipInfo(F("WR: "), chipType, true);
         } else {
-          drawKeyInfoRfidChip(F("WR RF: "), chipType);
+          drawChipInfo(F("WR RF: "), chipType, false);
         }
         display.setCursor(0, 14);
         formatUID(tempTp, newID, tempUidLen);
@@ -985,7 +974,7 @@ void loop() {
         uint8_t readBuf[RW1990_UID_SIZE];
         if (rw1990_read(readBuf)) {
           uint8_t rchip = detectOneWireChip(readBuf);
-          drawKeyInfoOwChip(F("RW: "), rchip);
+          drawChipInfo(F("RW: "), rchip, true);
           display.setCursor(0, 14);
           formatUID(TYPE_RW, readBuf, RW1990_UID_SIZE);
           display.setCursor(0, 24);
