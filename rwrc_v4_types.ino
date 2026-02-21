@@ -1034,7 +1034,33 @@ void loop() {
             }
           }
         } else {
-          devicePresent = rfid.PICC_IsNewCardPresent();
+          // TYPE_13: RF13.56 MHz card
+          devicePresent = false;
+          Serial.println(F("WR:CHECK_RF"));
+
+          bool isPresent = rfid.PICC_IsNewCardPresent();
+          Serial.print(F("WR:PICC_PRESENT:"));
+          Serial.println(isPresent ? F("YES") : F("NO"));
+
+          if (isPresent) {
+            bool isRead = rfid.PICC_ReadCardSerial();
+            Serial.print(F("WR:READ_SERIAL:"));
+            Serial.println(isRead ? F("YES") : F("NO"));
+
+            if (isRead) {
+              Serial.print(F("WR:UID:"));
+              for (byte i = 0; i < rfid.uid.size; i++) {
+                if (rfid.uid.uidByte[i] < 0x10) Serial.print('0');
+                Serial.print(rfid.uid.uidByte[i], HEX);
+              }
+              Serial.println();
+            }
+
+            devicePresent = isRead;
+          }
+
+          Serial.print(F("WR:DEVICE_PRESENT:"));
+          Serial.println(devicePresent ? F("YES") : F("NO"));
         }
         
         if (!devicePresent) {
