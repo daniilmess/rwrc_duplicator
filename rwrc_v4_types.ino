@@ -369,12 +369,7 @@ bool mifare_auth_sector(byte sector, MFRC522::MIFARE_Key* key) {
 bool rfid_mifare_write(const uint8_t* data, uint8_t dataLen) {
   Serial.println(F("DEBUG:rfid_mifare_write START"));
 
-  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
-    Serial.println(F("RF:NODEV"));
-    return false;
-  }
-  Serial.println(F("RF:PICC_PRESENT"));
-
+  // Card is already selected from WRITE case - use the already-read rfid.uid directly
   Serial.print(F("RF:UID:"));
   for (byte i = 0; i < rfid.uid.size; i++) {
     if (rfid.uid.uidByte[i] < 0x10) Serial.print('0');
