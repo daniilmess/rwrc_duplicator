@@ -751,6 +751,7 @@ void setup() {
   okBeep();
 
   enc.setTimeout(380);
+  enc.setHoldTimeout(1500);
 
   loadEEPROM();
   drawMain();
@@ -861,6 +862,7 @@ void loop() {
         rfid.PICC_HaltA();
         drawKeyInfoRfidChip(F("RF 13.56: "), tempRfidChip);
         display.setCursor(0, 14);
+        display.println(F("UID:"));
         formatUID(TYPE_13, tempBuf, tempUidLen);
         display.display();
         okBeep();
@@ -1060,6 +1062,11 @@ void loop() {
         
         if (!devicePresent) {
           break;
+        }
+
+        if (tempTp == TYPE_13) {
+          Serial.println(F("WAIT_FOR_STABLE"));
+          delay(1000);
         }
         
         digitalWrite(LED_Y, LOW);
