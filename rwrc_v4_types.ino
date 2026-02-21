@@ -88,8 +88,7 @@ enum Mode {
   READ_RESULT,
   SAVED_DETAIL,
   CONFIRM_DELETE,
-  WRITE,
-  DIAGNOSTICS
+  WRITE
 };
 Mode mode = MAIN;
 
@@ -368,25 +367,27 @@ bool mifare_auth_sector(byte sector, MFRC522::MIFARE_Key* key) {
 // Selects the card, authenticates sector 1, writes 16 bytes, verifies by read-back.
 // Returns true on success.
 bool rfid_mifare_write(const uint8_t* data, uint8_t dataLen) {
+  Serial.println(F("DEBUG:rfid_mifare_write START"));
+
   if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
     Serial.println(F("RF:NODEV"));
     return false;
   }
+  Serial.println(F("RF:PICC_PRESENT"));
 
-  Serial.print(F("RF:WR UID:"));
+  Serial.print(F("RF:UID:"));
   for (byte i = 0; i < rfid.uid.size; i++) {
     if (rfid.uid.uidByte[i] < 0x10) Serial.print('0');
     Serial.print(rfid.uid.uidByte[i], HEX);
-    Serial.print(' ');
   }
   Serial.println();
 
-  Serial.print(F("SAK:0x"));
+  Serial.print(F("RF:SAK:0x"));
   if (rfid.uid.sak < 0x10) Serial.print('0');
   Serial.println(rfid.uid.sak, HEX);
   MFRC522::PICC_Type piccType = rfid.PICC_GetType(rfid.uid.sak);
-  Serial.print(F("PICC:"));
-  Serial.println(rfid.PICC_GetTypeName(piccType));
+  Serial.print(F("RF:PICC_TYPE:"));
+  Serial.println((int)piccType);
 
   Serial.print(F("DATA:"));
   for (byte i = 0; i < dataLen && i < 16; i++) {
@@ -399,38 +400,52 @@ bool rfid_mifare_write(const uint8_t* data, uint8_t dataLen) {
   MFRC522::MIFARE_Key key;
   for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
 
-  Serial.print(F("AUTH s=1:"));
-  if (!mifare_auth_sector(1, &key)) {
+  Serial.println(F("RF:AUTH_ATTEMPT"));
+  byte blockAddr = 4; // sector 1, first data block
+  MFRC522::StatusCode authStatus = rfid.PCD_Authenticate(
+    MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, &key, &(rfid.uid));
+  Serial.print(F("RF:AUTH_STATUS:"));
+  Serial.println((int)authStatus);
+  if (authStatus != MFRC522::STATUS_OK) {
     rfid.PICC_HaltA();
     rfid.PCD_StopCrypto1();
     return false;
   }
-  Serial.println(F("OK"));
+  Serial.println(F("RF:AUTH_OK"));
 
   byte writeData[16] = {0};
   memcpy(writeData, data, min(dataLen, (uint8_t)16));
 
-  Serial.print(F("WR b=4:"));
-  MFRC522::StatusCode status = rfid.MIFARE_Write(4, writeData, 16);
-  if (status != MFRC522::STATUS_OK) {
-    Serial.println(F("FAIL"));
+  Serial.print(F("RF:WRITE_BLOCK:4 LEN:"));
+  Serial.println(dataLen);
+  MFRC522::StatusCode writeStatus = rfid.MIFARE_Write(4, writeData, 16);
+  Serial.print(F("RF:WRITE_STATUS:"));
+  Serial.println((int)writeStatus);
+  if (writeStatus != MFRC522::STATUS_OK) {
     rfid.PICC_HaltA();
     rfid.PCD_StopCrypto1();
     return false;
   }
-  Serial.println(F("OK"));
 
-  Serial.print(F("READ b=4:"));
+  Serial.println(F("RF:READ_ATTEMPT"));
   byte readBuf[18];
   byte readLen = sizeof(readBuf);
-  status = rfid.MIFARE_Read(4, readBuf, &readLen);
-  if (status != MFRC522::STATUS_OK) {
-    Serial.println(F("FAIL"));
+  MFRC522::StatusCode readStatus = rfid.MIFARE_Read(4, readBuf, &readLen);
+  Serial.print(F("RF:READ_STATUS:"));
+  Serial.println((int)readStatus);
+  if (readStatus != MFRC522::STATUS_OK) {
     rfid.PICC_HaltA();
     rfid.PCD_StopCrypto1();
     return false;
   }
-  Serial.println(F("OK"));
+
+  Serial.print(F("RF:READ_DATA:"));
+  for (byte i = 0; i < 16; i++) {
+    if (readBuf[i] < 0x10) Serial.print('0');
+    Serial.print(readBuf[i], HEX);
+    Serial.print(' ');
+  }
+  Serial.println();
 
   bool match = (memcmp(readBuf, writeData, 16) == 0);
   Serial.println(match ? F("CMP:OK") : F("CMP:FAIL"));
@@ -601,20 +616,7 @@ void drawMain() {
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(4, 2); display.println(cursor == 0 ? "> Read Key" : "  Read Key");
   display.setCursor(4, 10); display.println(cursor == 1 ? "> Keys"  : "  Keys");
-  display.setCursor(4, 18); display.println(cursor == 2 ? "> Diag" : "  Diag");
   display.display();
-}
-
-void drawDiagnostics() {
-  drawKeyInfo("DIAG");
-  display.display();
-}
-
-void returnToDiagnostics(uint8_t cursorPos) {
-  mode = DIAGNOSTICS;
-  cursor = cursorPos;
-  drawDiagnostics();
-  busy = false;
 }
 
 void drawList() {
@@ -782,7 +784,7 @@ void loop() {
 
     case MAIN:
       if (enc.turn()) {
-        cursor = (cursor + enc.dir() + 3) % 3;
+        cursor = (cursor + enc.dir() + 2) % 2;
         drawMain();
       }
       if (enc.click()) {
@@ -798,11 +800,6 @@ void loop() {
           mode = LIST; 
           selKey = 0; 
           drawList(); 
-        }
-        if (cursor == 2) {
-          mode = DIAGNOSTICS;
-          cursor = 0;
-          drawDiagnostics();
         }
       }
       break;
@@ -1092,7 +1089,14 @@ void loop() {
         }
       } else {
         // For MIFARE RF cards: authenticate sector 1, write data, verify
+        if (tempTp == TYPE_13) {
+          Serial.println(F("WRITE_RF13_START"));
+        }
         res = rfid_mifare_write(newID, tempUidLen);
+        if (tempTp == TYPE_13) {
+          Serial.print(F("WRITE_RF13_RESULT:"));
+          Serial.println(res ? "OK" : "FAIL");
+        }
 
         display.clearDisplay();
         display.setCursor(0, 8);
@@ -1111,15 +1115,6 @@ void loop() {
       delay(1800);
 
       mode = LIST; drawList(); busy = false;
-      break;
-    }
-
-    case DIAGNOSTICS: {
-      if (enc.hold()) {
-        mode = MAIN;
-        cursor = 0;
-        drawMain();
-      }
       break;
     }
   }
