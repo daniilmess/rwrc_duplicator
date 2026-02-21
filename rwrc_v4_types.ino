@@ -1119,11 +1119,101 @@ void loop() {
         // For MIFARE RF cards: authenticate sector 0, write UID blocks, verify
         if (tempTp == TYPE_13) {
           Serial.println(F("WRITE_RF13_START"));
-        }
-        res = rfid_mifare_write(newID, tempUidLen);
-        if (tempTp == TYPE_13) {
-          Serial.print(F("WRITE_RF13_RESULT:"));
-          Serial.println(res ? "OK" : "FAIL");
+
+          MFRC522::MIFARE_Key key;
+          for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
+
+          byte block = 0;
+          byte buffer[18];
+          byte size = sizeof(buffer);
+          MFRC522::StatusCode status;
+
+          // Authenticate block 0
+          Serial.println(F("RF:AUTH"));
+          status = rfid.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, block, &key, &(rfid.uid));
+
+          if (status != MFRC522::STATUS_OK) {
+            Serial.print(F("RF:AUTH_FAIL:"));
+            Serial.println(status);
+            res = false;
+          } else {
+            Serial.println(F("RF:AUTH_OK"));
+
+            // Read block 0
+            Serial.println(F("RF:READ"));
+            status = rfid.MIFARE_Read(block, buffer, &size);
+
+            if (status != MFRC522::STATUS_OK) {
+              Serial.print(F("RF:READ_FAIL:"));
+              Serial.println(status);
+              res = false;
+            } else {
+              Serial.println(F("RF:READ_OK"));
+
+              // Modify UID bytes only (don't recalculate BCC at buffer[4]:
+              // Chinese magic MIFARE cards handle BCC internally)
+              for (byte i = 0; i < 4; i++) {
+                buffer[i] = newID[i];
+              }
+
+              Serial.print(F("RF:WRITE:"));
+              for (byte i = 0; i < 4; i++) {
+                if (buffer[i] < 0x10) Serial.print('0');
+                Serial.print(buffer[i], HEX);
+                Serial.print(' ');
+              }
+              Serial.println();
+
+              // Write block 0
+              status = rfid.MIFARE_Write(block, buffer, 16);
+
+              if (status != MFRC522::STATUS_OK) {
+                Serial.print(F("RF:WRITE_FAIL:"));
+                Serial.println(status);
+                res = false;
+              } else {
+                Serial.println(F("RF:WRITE_OK"));
+
+                // Verify - read block 0 again
+                Serial.println(F("RF:VERIFY"));
+                byte verifyBuf[18];
+                byte verifySize = sizeof(verifyBuf);
+
+                status = rfid.MIFARE_Read(block, verifyBuf, &verifySize);
+                if (status == MFRC522::STATUS_OK) {
+                  bool match = true;
+                  for (byte i = 0; i < 4; i++) {
+                    if (verifyBuf[i] != newID[i]) {
+                      match = false;
+                      break;
+                    }
+                  }
+
+                  if (match) {
+                    Serial.println(F("RF:VERIFY_OK"));
+                    res = true;
+                  } else {
+                    Serial.println(F("RF:VERIFY_FAIL"));
+                    res = false;
+                  }
+                } else {
+                  Serial.print(F("RF:VERIFY_FAIL:"));
+                  Serial.println(status);
+                  res = false;
+                }
+              }
+            }
+          }
+
+          rfid.PCD_StopCrypto1();
+
+          if (res) {
+            Serial.println(F("WRITE_RF13_RESULT:OK"));
+          } else {
+            Serial.println(F("WRITE_RF13_RESULT:FAIL"));
+          }
+        } else {
+          res = rfid_mifare_write(newID, tempUidLen);
         }
 
         display.clearDisplay();
