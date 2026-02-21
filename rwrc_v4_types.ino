@@ -139,9 +139,6 @@ void printRfidChipNameToDisplay(uint8_t chip) {
 }
 
 // Probe the OneWire bus to identify the chip type.
-// Takes the already-read 8-byte ROM (uid[0] is the family code).
-// For family 0x01, sends write-enable and checks acknowledgment to
-// distinguish RW1990.1 from RW1990.2.
 uint8_t detectOneWireChip(const uint8_t* uid) {
   switch (uid[0]) {
     case 0x70: return OW_TM2004;
@@ -214,12 +211,6 @@ static bool rw1990_is_ok(const uint8_t* buf) {
 }
 
 // Read RW1990 key and output diagnostics to serial
-// Parameters:
-//   buf: Buffer to store 8-byte UID
-// Returns:
-//   true if key is found (regardless of Family/CRC errors)
-//   false if no key is present
-// Note: Always outputs diagnostic info to Serial including error status
 bool rw1990_read(uint8_t* buf, bool silent = false) {
   ow.reset_search();
   bool found = ow.search(buf);
@@ -259,17 +250,15 @@ bool rw1990_write(const uint8_t* id) {
   // Device present, proceed with write (works even for broken keys)
   Serial.println(F("RW:WR"));
 
-  // Read old ID first using 0x33 command (works with all keys, required for broken keys to write successfully)
+  // Read old ID first using 0x33 command
   ow.skip();
   ow.reset();
   ow.write(0x33);
   
-  // Read and store old ID into global oldID buffer
   for (uint8_t i = 0; i < RW1990_UID_SIZE; i++) {
     oldID[i] = ow.read();
   }
 
-  // Debug: show id to be written
   Serial.print(F("newID:"));
   for (uint8_t i = 0; i < RW1990_UID_SIZE; i++) {
     Serial.print(id[i] < 16 ? "0" : "");
@@ -278,7 +267,6 @@ bool rw1990_write(const uint8_t* id) {
   }
   Serial.println();
 
-  // Now proceed with write sequence
   ow.skip();
   ow.reset();
   ow.write(0xD1);
@@ -375,6 +363,15 @@ void errBeep() {
   toneBeep(1400, 100);
   delay(1000);
   digitalWrite(LED_Y, LOW);
+}
+
+void showErrorMessage(const __FlashStringHelper* msg) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 8);
+  display.println(F("WR:FAIL"));
+  display.println(msg);
+  display.display();
 }
 
 void tickBeep() {
@@ -963,7 +960,6 @@ void loop() {
         }
 
         if (tempTp == TYPE_13) {
-          Serial.println(F("WAIT_FOR_STABLE"));
           delay(1000);
         }
         
@@ -975,7 +971,7 @@ void loop() {
       // Show writing progress on line 24
       display.fillRect(0, 24, 128, 8, SSD1306_BLACK);
       display.setCursor(0, 24);
-      display.print(F("Writing: * * * * * * * *"));
+      display.print(F("Writing..."));
       display.display();
 
       if (tempTp == TYPE_RW) {
@@ -994,36 +990,22 @@ void loop() {
           display.display();
           if (rw1990_is_ok(readBuf)) okBeep(); else errBeep();
           if (memcmp(readBuf, newID, RW1990_UID_SIZE) != 0) {
-            // Data mismatch - write failed, show error overlay
             delay(1000);
-            display.clearDisplay();
-            display.setTextSize(1);
-            display.setCursor(0, 8);
-            display.println(F("WR:FAIL"));
-            display.println(F("Data mismatch"));
-            display.display();
+            showErrorMessage(F("Data mismatch"));
           }
         } else {
           // No device found after write
           errBeep();
-          display.clearDisplay();
-          display.setTextSize(1);
-          display.setCursor(0, 8);
-          display.println(F("WR:FAIL"));
-          display.println(F("CHK:FAIL"));
-          display.display();
+          showErrorMessage(F("CHK:FAIL"));
         }
       } else {
         // For MIFARE RF cards: authenticate sector 0, write UID blocks, verify
         if (tempTp == TYPE_13) {
-          Serial.println(F("WRITE_RF13_START"));
-
-          byte buffer[18];
-          byte size = sizeof(buffer);
+          byte buffer[16];
+          byte size = 16;
           MFRC522::StatusCode status;
 
           // Read current block 0
-          Serial.println(F("RF:READ_BLOCK_0"));
           status = rfid.MIFARE_Read(0, buffer, &size);
 
           if (status != MFRC522::STATUS_OK) {
@@ -1031,33 +1013,22 @@ void loop() {
             Serial.println(status);
             res = false;
           } else {
-            Serial.println(F("RF:READ_OK"));
 
             // Modify UID bytes (first 4 bytes)
             for (byte i = 0; i < 4; i++) {
               buffer[i] = newID[i];
             }
 
-            Serial.print(F("RF:WRITE:"));
-            for (byte i = 0; i < 4; i++) {
-              if (buffer[i] < 0x10) Serial.print('0');
-              Serial.print(buffer[i], HEX);
-              Serial.print(' ');
-            }
-            Serial.println();
-
             // STOP CRYPTO before opening backdoor
             rfid.PCD_StopCrypto1();
 
             // OPEN BACKDOOR for magic card using library function
-            Serial.println(F("RF:OPEN_BACKDOOR"));
             if (!rfid.MIFARE_OpenUidBackdoor(true)) {  // true = log errors
               Serial.println(F("RF:BACKDOOR_FAIL"));
               res = false;
             } else {
 
             // WRITE block 0
-            Serial.println(F("RF:WRITE_BLOCK_0"));
             status = rfid.MIFARE_Write(0, buffer, 16);
 
             if (status != MFRC522::STATUS_OK) {
@@ -1065,10 +1036,8 @@ void loop() {
               Serial.println(status);
               res = false;
             } else {
-              Serial.println(F("RF:WRITE_OK"));
 
               // Wake up card for verification
-              Serial.println(F("RF:WAKEUP"));
               byte atqa_answer[2];
               byte atqa_size = sizeof(atqa_answer);
               rfid.PICC_WakeupA(atqa_answer, &atqa_size);
@@ -1076,16 +1045,14 @@ void loop() {
               delay(50);
 
               // Read block 0 to verify
-              Serial.println(F("RF:VERIFY"));
-              byte verifyBuf[18];
-              byte verifySize = sizeof(verifyBuf);
+              byte verifyBuf[16];
+              byte verifySize = 16;
 
               status = rfid.MIFARE_Read(0, verifyBuf, &verifySize);
               if (status == MFRC522::STATUS_OK) {
                 bool match = (verifyBuf[0] == newID[0] && verifyBuf[1] == newID[1] &&
                               verifyBuf[2] == newID[2] && verifyBuf[3] == newID[3]);
                 if (match) {
-                  Serial.println(F("RF:VERIFY_OK"));
                   res = true;
                 } else {
                   Serial.println(F("RF:VERIFY_FAIL"));
